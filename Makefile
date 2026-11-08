@@ -1,14 +1,14 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -g -O0
 TARGET   := compiler
-SRC      := src/main.cpp
+SRC      := src/main.cpp src/Tokenizer/tokenizer.cpp
 
 .PHONY: all clean run
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) $< -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 run: $(TARGET)
 	./$(TARGET)
