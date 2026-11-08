@@ -119,7 +119,7 @@ int main(int argc, char* argv[]) {
         std::cout << line << '\n';
     }
 
-    return 1;
+    return 0;
 }
 
 
@@ -157,6 +157,6 @@ for (std::size_t line : errors) {
     std::cout << line << '\n';
 }
 
-return 1;
+return 0;
 
 }
