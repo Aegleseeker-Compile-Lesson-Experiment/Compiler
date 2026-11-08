@@ -4,7 +4,7 @@ CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
 
 TARGET = compiler
 
-SRCS = src/main.cpp src/lexer.cpp
+SRCS = src/main.cpp src/lexer.cpp src/parser.cpp
 OBJS = $(SRCS:.cpp=.o)
 
 all: $(TARGET)

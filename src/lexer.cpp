@@ -41,12 +41,22 @@ char Lexer::advance() {
     return c;
 }
 
-void Lexer::report_error(std::size_t line, std::size_t column,
+
+void Lexer::report_error(std::size_t line,
+                         std::size_t column,
                          const std::string& message) {
     ok_ = false;
-    std::cerr << "lexical error at " << line << ':' << column
+
+    // Lexer 内部使用从 1 开始的行号，
+    // 实验二评测使用从 0 开始的行号。
+    error_lines_.push_back(line > 0 ? line - 1 : 0);
+
+    // 调试信息仍输出到 stderr
+    std::cerr << "lexical error at "
+              << line << ':' << column
               << ": " << message << '\n';
 }
+
 
 void Lexer::skip_whitespace_and_comments() {
     while (pos_ < source_.size()) {
