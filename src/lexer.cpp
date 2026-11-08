@@ -102,11 +102,9 @@ std::vector<Token> Lexer::tokenize() {
 
         // Unsigned integer: (0|[1-9][0-9]*)
         if (is_digit(c)) {
-            if (c == '0') {
-                advance(); // leading zero is a separate IntConst token
-            } else {
-                do { advance(); } while (is_digit(peek()));
-            }
+            do {
+                advance();
+            } while (is_digit(peek()));
             std::string digits = source_.substr(start, pos_ - start);
 
             // Keep lexical conversion safe. 2147483648 is allowed here
