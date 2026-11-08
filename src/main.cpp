@@ -115,7 +115,7 @@ public:
             } else if (token.type == TokenType::IDENTIFIER) {
                 std::printf("%d:Ident:\"%s\"\n", cnt++, token.lexeme.c_str());
             } else if (token.type == TokenType::CONSTANT) {
-                std::printf("%d:IntConst:\"%d\"\n", cnt++, token.value);
+                std::printf("%d:IntConst:\"%s\"\n", cnt++, token.lexeme.c_str());
             } else if (token.type == TokenType::STRING_LITERAL) {
                 std::printf("%d:StringLiteral:\"%s\"\n", cnt++, token.lexeme.c_str());
             }
