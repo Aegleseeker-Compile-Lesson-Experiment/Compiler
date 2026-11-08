@@ -1,44 +1,60 @@
 #include "tokernizer.h"
 
 Tokenizer::Tokenizer() {
-    for (auto t : KEYWORD) { keyword.insert(t); }
-    for (auto t : SYMBOL) { symbol.insert(t); }
+    for (const auto &kw : KEYWORD) keyword.insert(kw);
+    for (const auto &sym : SYMBOL) symbol.insert(sym);
     std::string s;
     bool in_comment = false;
     int line = 0;
     while (std::getline(std::cin, s)) {
+        if (!s.empty() && s.back() == '\r') {
+            s.pop_back();
+        }
         std::string t = "";
         for (size_t i = 0; i < s.length(); ++i) {
             if (in_comment) {
-                if (s[i] == '/' && s[i - 1] == '*') in_comment = false;
+                if (s[i] == '*' && i + 1 < s.length() && s[i + 1] == '/') {
+                    in_comment = false;
+                    ++i;
+                }
                 continue;
             }
-            if (s[i] == '/' && s[i + 1] == '/') break;
-            if (s[i] == '/' && s[i + 1] == '*') {
+            if (s[i] == '/' && i + 1 < s.length() && s[i + 1] == '/') {
+                catch_token(t, line, i);
+                break;
+            }
+            if (s[i] == '/' && i + 1 < s.length() && s[i + 1] == '*') {
+                catch_token(t, line, i);
                 in_comment = true;
-                continue;
-            }
-            if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
-                catch_token(t, line, i);
-                continue;
-            }
-            std::string may_be_symbol = "", may_be_double_symbol = "";
-            may_be_symbol += s[i];
-            may_be_double_symbol = may_be_symbol + s[i + 1];
-            if (is_symbol(may_be_double_symbol)) {
-                catch_token(t, line, i);
-                catch_token(may_be_double_symbol, line, i);
                 ++i;
                 continue;
             }
-            if (is_symbol(may_be_symbol)) {
+            if (std::isspace(static_cast<unsigned char>(s[i]))) {
                 catch_token(t, line, i);
-                catch_token(may_be_symbol, line, i);
+                continue;
+            }
+            if (i + 1 < s.length()) {
+                std::string double_symbol = {s[i], s[i + 1]};
+                if (is_symbol(double_symbol)) {
+                    catch_token(t, line, i);
+                    catch_token(double_symbol, line, i);
+                    ++i;
+                    continue;
+                }
+            }
+            std::string single_symbol = {s[i]};
+            if (is_symbol(single_symbol)) {
+                catch_token(t, line, i);
+                catch_token(single_symbol, line, i);
                 continue;
             }
             t += s[i];
         }
-        catch_token(t, line++, s.size());
+        if (!in_comment) {
+            catch_token(t, line++, s.size());
+        } else {
+            line++;
+        }
     }
 }
 
