@@ -365,10 +365,20 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
     if (match("while")) {
         if (!match("(")) {
             recordSyntaxError();
-        }   
-        auto condition = parseExpr();
+        }
+
+        std::unique_ptr<Expr> condition;
+
+        // 空条件：while ()
+        if (check(")")) {
+            recordSyntaxError();
+        } else {
+            condition = parseExpr();
+        }
+
         expect(")");
 
+        // 即使条件缺失，也继续解析循环体
         auto body = parseStmt();
 
         return std::make_unique<While>(
@@ -464,6 +474,16 @@ std::unique_ptr<Block> Parser::parseBlock() {
             !check("}") && !atEnd()) {
             advance();
         }
+    }
+
+    // EOF 时仍未遇到右花括号
+    if (atEnd()) {
+        recordSyntaxError();
+
+        return std::make_unique<Block>(
+            SourceLocation{start.line, start.column},
+            std::move(statements)
+        );
     }
 
     expect("}");
