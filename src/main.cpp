@@ -26,7 +26,7 @@ void print_token(const Token& token, std::size_t index) {
             std::cout << "Ident:\"" << token.lexeme << "\"";
             break;
         case TokenKind::IntConst:
-            std::cout << "IntConst:" << token.lexeme;
+            std::cout << "IntConst:\"" << token.lexeme << '"';
             break;
         case TokenKind::Symbol:
             std::cout << '\'' << token.lexeme << "':\""
