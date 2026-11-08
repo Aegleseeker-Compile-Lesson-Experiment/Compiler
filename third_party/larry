@@ -2,24 +2,82 @@
 // "\epsilon" is used to describe ε.
 
 Terminal Symbol
-+ * ( ) a
+ID ( ) int void , { } ; = const if else while break continue return || && < > <= >= == != + - * / % ! NUMBER
 
 Non-Terminal Symbol
-E T F
+CompUnit FuncDef FuncType FuncFParams Param Block StmtList Stmt MatchedStmt OpenStmt Expr LOrExpr LAndExpr RelExpr AddExpr MulExpr UnaryExpr PrimaryExpr FuncRParams
 
 Start Symbol
-E
+CompUnit
 
 Productions
-E \to T
-E \to E + T
-T \to T * F
-T \to F
-F \to ( E )
-F \to a
+CompUnit \to CompUnit FuncDef
+CompUnit \to FuncDef
+FuncDef \to FuncType ID ( ) Block
+FuncDef \to FuncType ID ( FuncFParams ) Block
+FuncType \to int
+FuncType \to void
+FuncFParams \to FuncFParams , Param
+FuncFParams \to Param
+Param \to int ID
+Block \to { }
+Block \to { StmtList }
+StmtList \to StmtList Stmt
+StmtList \to Stmt
+Stmt \to MatchedStmt
+Stmt \to OpenStmt
+MatchedStmt \to if ( Expr ) MatchedStmt else MatchedStmt
+MatchedStmt \to while ( Expr ) MatchedStmt
+MatchedStmt \to Block
+MatchedStmt \to ;
+MatchedStmt \to Expr ;
+MatchedStmt \to ID = Expr ;
+MatchedStmt \to int ID ;
+MatchedStmt \to int ID = Expr ;
+MatchedStmt \to const int ID = Expr ;
+MatchedStmt \to break ;
+MatchedStmt \to continue ;
+MatchedStmt \to return ;
+MatchedStmt \to return Expr ;
+OpenStmt \to if ( Expr ) Stmt
+OpenStmt \to if ( Expr ) MatchedStmt else OpenStmt
+OpenStmt \to while ( Expr ) OpenStmt
+Expr \to LOrExpr
+LOrExpr \to LAndExpr
+LOrExpr \to LOrExpr || LAndExpr
+LAndExpr \to RelExpr
+LAndExpr \to LAndExpr && RelExpr
+RelExpr \to AddExpr
+RelExpr \to RelExpr < AddExpr
+RelExpr \to RelExpr > AddExpr
+RelExpr \to RelExpr <= AddExpr
+RelExpr \to RelExpr >= AddExpr
+RelExpr \to RelExpr == AddExpr
+RelExpr \to RelExpr != AddExpr
+AddExpr \to MulExpr
+AddExpr \to AddExpr + MulExpr
+AddExpr \to AddExpr - MulExpr
+MulExpr \to UnaryExpr
+MulExpr \to MulExpr * UnaryExpr
+MulExpr \to MulExpr / UnaryExpr
+MulExpr \to MulExpr % UnaryExpr
+UnaryExpr \to PrimaryExpr
+UnaryExpr \to + UnaryExpr
+UnaryExpr \to - UnaryExpr
+UnaryExpr \to ! UnaryExpr
+PrimaryExpr \to ID
+PrimaryExpr \to NUMBER
+PrimaryExpr \to ( Expr )
+PrimaryExpr \to ID ( )
+PrimaryExpr \to ID ( FuncRParams )
+FuncRParams \to FuncRParams , Expr
+FuncRParams \to Expr
 
 Enable Solve Left Recursion
 false
 
+Enable Debug
+false
+
 Sentence
-( ( a * ( a + a ) ) * ( a ) )
+int ID ( ) { const int ID = NUMBER ; const int ID = NUMBER ; }

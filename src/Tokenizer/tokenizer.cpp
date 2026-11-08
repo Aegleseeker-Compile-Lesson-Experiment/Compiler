@@ -41,20 +41,24 @@ Tokenizer::Tokenizer() {
         catch_token(t, line++, s.size());
     }
 }
+
 bool Tokenizer::is_keyword(const std::string &s) {
     if (keyword.find(s) == keyword.end()) return false;
     return true;
 }
+
 bool Tokenizer::is_symbol(const std::string &s) {
     if (symbol.find(s) == symbol.end()) return false;
     return true;
 }
+
 bool Tokenizer::is_constant(const std::string &s) {
     for (size_t i = 0; i < s.length(); ++i) {
         if (!isdigit(s[i])) return false;
     }
     return true;
 }
+
 void Tokenizer::catch_token(std::string &s, const int line, const int column) {
     if (s != "" && s != "\n" && s != "\t" && s != "\r") {
         auto token = Token { TokenType::IDENTIFIER, s, line, column, 0 };
@@ -72,12 +76,14 @@ void Tokenizer::catch_token(std::string &s, const int line, const int column) {
     }
     s = "";
 }
+
 std::string Tokenizer::getNext() {
     if (tokens.empty()) return "";
     auto token = tokens.front();
     tokens.pop();
     return token.lexeme;
 }
+
 void Tokenizer::print() {
     int cnt = 0;
     while (!tokens.empty()) {
@@ -95,4 +101,24 @@ void Tokenizer::print() {
             std::printf("%d:StringLiteral:\"%s\"\n", cnt++, token.lexeme.c_str());
         }
     }
+}
+
+void Tokenizer::print_to_sentence() {
+    std::vector<std::string> sentence;
+    while (!tokens.empty()) {
+        auto token = tokens.front();
+        tokens.pop();
+        if (token.type == TokenType::KEYWORD) {
+            sentence.push_back(token.lexeme);
+        } else if (token.type == TokenType::SYMBOL) {
+            sentence.push_back(token.lexeme);
+        } else if (token.type == TokenType::IDENTIFIER) {
+            sentence.push_back("ID");
+        } else if (token.type == TokenType::CONSTANT) {
+            sentence.push_back("NUMBER");
+        } else if (token.type == TokenType::STRING_LITERAL) {
+            sentence.push_back("404 Not Found");
+        }
+    }
+    Global::sentence.push_back(sentence);
 }

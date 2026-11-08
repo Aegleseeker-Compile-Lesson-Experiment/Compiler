@@ -22,16 +22,24 @@ void LR1::export_to_dot_lr1(const std::string& filename) {
                 else if (symbol == "\\cdot") symbol = "·";
                 else if (symbol == "\\epsilon") symbol = "ε";
                 else if (symbol == "<") symbol = "&lt;";
+                else if (symbol == "<=") symbol = "&lt;=";
                 else if (symbol == ">") symbol = "&gt;";
+                else if (symbol == ">=") symbol = "&gt;=";
                 else if (symbol == "&") symbol = "&amp;";
+                else if (symbol == "&&") symbol = "&amp;&amp;";
                 text += symbol + " ";
             }
             text += ", ";
             for (auto symbol : follow_symbols) {
-                if (symbol == "\\epsilon") symbol = "ε";
+                if (symbol == "\\to") symbol = "-&gt;";
+                else if (symbol == "\\cdot") symbol = "·";
+                else if (symbol == "\\epsilon") symbol = "ε";
                 else if (symbol == "<") symbol = "&lt;";
+                else if (symbol == "<=") symbol = "&lt;=";
                 else if (symbol == ">") symbol = "&gt;";
+                else if (symbol == ">=") symbol = "&gt;=";
                 else if (symbol == "&") symbol = "&amp;";
+                else if (symbol == "&&") symbol = "&amp;&amp;";
                 text += symbol + " ";
             }
             return text;
@@ -214,51 +222,53 @@ void LR1::print_lr1_table() {
     auto print_h_line = [&]() {
         std::cout << "+-------+" << std::string(action_total_w, '-') << "+" << std::string(goto_total_w, '-') << "+\n";
     };
-    std::cout << "\nLR(1) Parsing Table:\n";
-    print_h_line();
-    std::cout << "| " << std::left << std::setw(5) << " " << " |"
-              << std::setw(action_total_w / 2 + 3) << std::right << "ACTION"
-              << std::setw(action_total_w - (action_total_w / 2 + 3)) << " " << "|"
-              << std::setw(goto_total_w / 2 + 2) << std::right << "GOTO"
-              << std::setw(goto_total_w - (goto_total_w / 2 + 2)) << " " << "|\n";
-    std::cout << "| " << std::left << std::setw(5) << "State" << " |";
-    for (const auto& term : action_cols) {
-        std::cout << std::right << std::setw(W - 1) << term << " ";
-    }
-    std::cout << "|";
-    for (const auto& non_term : goto_cols) {
-        std::cout << std::right << std::setw(W - 1) << non_term << " ";
-    }
-    std::cout << "|\n";
-    print_h_line();
-    for (size_t i = 0; i < closure_lr1.size(); ++i) {
-        std::cout << "| " << std::right << std::setw(5) << i << " |";
+    if (Global::enable_debug) {
+        std::cout << "\nLR(1) Parsing Table:\n";
+        print_h_line();
+        std::cout << "| " << std::left << std::setw(5) << " " << " |"
+                << std::setw(action_total_w / 2 + 3) << std::right << "ACTION"
+                << std::setw(action_total_w - (action_total_w / 2 + 3)) << " " << "|"
+                << std::setw(goto_total_w / 2 + 2) << std::right << "GOTO"
+                << std::setw(goto_total_w - (goto_total_w / 2 + 2)) << " " << "|\n";
+        std::cout << "| " << std::left << std::setw(5) << "State" << " |";
         for (const auto& term : action_cols) {
-            std::string cell = "";
-            if (analysis_table_lr1.count({i, term})) {
-                auto act = analysis_table_lr1[{i, term}];
-                if (act.first == SLRAction::S) {
-                    cell = "s" + std::to_string(act.second);
-                } else if (act.first == SLRAction::R) {
-                    cell = "r" + std::to_string(act.second);
-                } else if (act.first == SLRAction::Accept) {
-                    cell = "acc";
-                }
-            }
-            std::cout << std::right << std::setw(W - 1) << cell << " ";
+            std::cout << std::right << std::setw(W - 1) << term << " ";
         }
         std::cout << "|";
         for (const auto& non_term : goto_cols) {
-            std::string cell = "";
-            if (goto_lr1.count({i, non_term})) {
-                cell = std::to_string(goto_lr1[{i, non_term}]);
-            }
-            std::cout << std::right << std::setw(W - 1) << cell << " ";
+            std::cout << std::right << std::setw(W - 1) << non_term << " ";
         }
         std::cout << "|\n";
+        print_h_line();
+        for (size_t i = 0; i < closure_lr1.size(); ++i) {
+            std::cout << "| " << std::right << std::setw(5) << i << " |";
+            for (const auto& term : action_cols) {
+                std::string cell = "";
+                if (analysis_table_lr1.count({i, term})) {
+                    auto act = analysis_table_lr1[{i, term}];
+                    if (act.first == SLRAction::S) {
+                        cell = "s" + std::to_string(act.second);
+                    } else if (act.first == SLRAction::R) {
+                        cell = "r" + std::to_string(act.second);
+                    } else if (act.first == SLRAction::Accept) {
+                        cell = "acc";
+                    }
+                }
+                std::cout << std::right << std::setw(W - 1) << cell << " ";
+            }
+            std::cout << "|";
+            for (const auto& non_term : goto_cols) {
+                std::string cell = "";
+                if (goto_lr1.count({i, non_term})) {
+                    cell = std::to_string(goto_lr1[{i, non_term}]);
+                }
+                std::cout << std::right << std::setw(W - 1) << cell << " ";
+            }
+            std::cout << "|\n";
+        }
+        print_h_line();
+        std::cout << std::endl;
     }
-    print_h_line();
-    std::cout << std::endl;
 }
 
 bool LR1::construct_lr1_analysis_table() {
@@ -275,7 +285,9 @@ bool LR1::construct_lr1_analysis_table() {
                 } else {
                     for (auto symbol:follow_symbols) {
                         if (analysis_table_lr1.find({i, symbol}) != analysis_table_lr1.end()) {
-                            puts("This grammar does not belong to LR(1)\n");
+                            if (Global::enable_debug) {
+                                puts("This grammar does not belong to LR(1)\n");
+                            }
                             return false;
                         }
                         analysis_table_lr1[{i, symbol}] = {SLRAction::R, getindex(production)};
@@ -290,7 +302,9 @@ bool LR1::construct_lr1_analysis_table() {
                 production.push_back("\\epsilon");
                 for (auto symbol:follow_symbols) {
                     if (analysis_table_lr1.find({i, symbol}) != analysis_table_lr1.end()) {
-                        puts("This grammar does not belong to LR(1)\n");
+                        if (Global::enable_debug) {
+                            puts("This grammar does not belong to LR(1)\n");
+                        }
                         return false;
                     }
                     analysis_table_lr1[{i, symbol}] = {SLRAction::R, getindex(production)};
@@ -302,28 +316,32 @@ bool LR1::construct_lr1_analysis_table() {
     return true;
 }
 
-void LR1::analyse_lr1_sentence() {
+bool LR1::analyse_lr1_sentence() {
     for (auto sentence : Global::sentence) {
-        std::cout << "Analyse ";
-        for (const auto &symbol : sentence) {
-            std::cout << symbol << " ";
+        if (Global::enable_debug) {
+            std::cout << "Analyse ";
+            for (const auto &symbol : sentence) {
+                std::cout << symbol << " ";
+            }
+            std::cout << ":\n";
         }
-        std::cout << ":\n";
         const int W_STEP   = 5;
         const int W_STATE  = 22;
         const int W_SYMBOL = 20;
         const int W_INPUT  = 20;
-        std::cout << std::left 
-                  << std::setw(W_STEP)   << "Step"   << " | "
-                  << std::setw(W_STATE)  << "State"  << " | "
-                  << std::setw(W_SYMBOL) << "Symbol" << " | "
-                  << std::setw(W_INPUT)  << "Input"  << " | "
-                  << "Action\n";
-        std::cout << std::string(W_STEP, '-')   << "-+-"
-                  << std::string(W_STATE, '-')  << "-+-"
-                  << std::string(W_SYMBOL, '-') << "-+-"
-                  << std::string(W_INPUT, '-')  << "-+-"
-                  << "---------------------\n";
+        if (Global::enable_debug) {
+            std::cout << std::left 
+                    << std::setw(W_STEP)   << "Step"   << " | "
+                    << std::setw(W_STATE)  << "State"  << " | "
+                    << std::setw(W_SYMBOL) << "Symbol" << " | "
+                    << std::setw(W_INPUT)  << "Input"  << " | "
+                    << "Action\n";
+            std::cout << std::string(W_STEP, '-')   << "-+-"
+                    << std::string(W_STATE, '-')  << "-+-"
+                    << std::string(W_SYMBOL, '-') << "-+-"
+                    << std::string(W_INPUT, '-')  << "-+-"
+                    << "---------------------\n";
+        }
         int step = 0;
         int index = 0;
         std::stack<ClosureEntry> stack;
@@ -334,6 +352,9 @@ void LR1::analyse_lr1_sentence() {
             auto closure = stack.top().first;
             auto right_symbol = sentence[index];
             auto stack_copy = stack;
+            if (analysis_table_lr1.find({closure, right_symbol}) == analysis_table_lr1.end()) {
+                return false;
+            }
             auto action = analysis_table_lr1[{closure, right_symbol}].first;
             auto target = analysis_table_lr1[{closure, right_symbol}].second;
             auto _ = (action == SLRAction::R) ? getproduction(target) : std::pair<std::string, Production>{"", Production{}};
@@ -369,14 +390,18 @@ void LR1::analyse_lr1_sentence() {
             } else if (action == SLRAction::Accept) {
                 ss_action << "Accept";
             }
-            std::cout << std::left
-                      << std::setw(W_STEP)   << step            << " | "
-                      << std::setw(W_STATE)  << ss_state.str()  << " | "
-                      << std::setw(W_SYMBOL) << ss_symbol.str() << " | "
-                      << std::setw(W_INPUT)  << ss_input.str()  << " | "
-                      << ss_action.str() << "\n";
+            if (Global::enable_debug) {
+                std::cout << std::left
+                        << std::setw(W_STEP)   << step            << " | "
+                        << std::setw(W_STATE)  << ss_state.str()  << " | "
+                        << std::setw(W_SYMBOL) << ss_symbol.str() << " | "
+                        << std::setw(W_INPUT)  << ss_input.str()  << " | "
+                        << ss_action.str() << "\n";
+            }
             if (action == SLRAction::Accept) {
-                std::cout << "\n";
+                if (Global::enable_debug) {
+                    std::cout << "\n";
+                }
                 break;
             }
             if (action == SLRAction::S) {
@@ -393,5 +418,6 @@ void LR1::analyse_lr1_sentence() {
             }
         }
     }
+    return true;
 }
 

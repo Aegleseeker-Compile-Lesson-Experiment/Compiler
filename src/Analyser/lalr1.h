@@ -14,7 +14,7 @@ public:
     void construct_lalr1_closure();
     void print_lalr1_table();
     bool construct_lalr1_analysis_table();
-    void analyse_lalr1_sentence();
+    bool analyse_lalr1_sentence();
 
 private:
     std::vector<std::pair<std::vector<std::pair<Production, FollowSymbols>>, std::vector<std::pair<Production, FollowSymbols>>>> closure_lalr1;

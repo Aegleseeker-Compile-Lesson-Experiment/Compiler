@@ -10,17 +10,23 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (std::string(argv[1]) == "-token") {
-        Tokenizer Main;
-        Main.print();
+        Tokenizer T;
+        T.print();
     }
     if (std::string(argv[1]) == "-ast") {
-        Analyser Main;
-        // Main.slr1_construct();
-        // Main.slr1_analyse();
-        Main.lr1_construct();
-        Main.lr1_analyse();
-        Main.lalr1_construct();
-        Main.lalr1_analyse();
+        Tokenizer T;
+        Analyser A;
+        T.print_to_sentence();
+        A.slr1_construct();
+        if (A.slr1_analyse()) {
+            puts("accept");
+        } else {
+            puts("reject");
+        }
+        // Main.lr1_construct();
+        // Main.lr1_analyse();
+        // Main.lalr1_construct();
+        // Main.lalr1_analyse();
     }
     return 0;
 }

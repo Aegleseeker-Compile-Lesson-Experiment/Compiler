@@ -13,7 +13,7 @@ public:
     void construct_slr1_closure();
     void print_slr_table();
     bool construct_slr1_analysis_table();
-    void analyse_slr1_sentence();
+    bool analyse_slr1_sentence();
 
 private:
     std::vector<std::pair<std::vector<Production>, std::vector<Production>>> closure_slr1;

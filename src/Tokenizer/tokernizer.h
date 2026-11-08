@@ -1,6 +1,8 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
+#include "../Analyser/init.h"
+
 #include <iostream>
 #include <string>
 #include <queue>
@@ -36,6 +38,7 @@ public:
     void catch_token(std::string &s, const int line, const int column);
     std::string getNext();
     void print();
+    void print_to_sentence();
 };
 
 #endif // TOKENIZER_H

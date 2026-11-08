@@ -13,7 +13,7 @@ public:
     void construct_lr1_closure();
     void print_lr1_table();
     bool construct_lr1_analysis_table();
-    void analyse_lr1_sentence();
+    bool analyse_lr1_sentence();
     std::map<ClosureEntry, int> get_goto_lr1() const { return goto_lr1; }
     std::map<ClosureEntry, Action> get_analysis_table_lr1() const { return analysis_table_lr1; }
     std::vector<std::pair<std::vector<std::pair<Production, FollowSymbols>>, std::vector<std::pair<Production, FollowSymbols>>>> get_closure_lr1() const { return closure_lr1; }

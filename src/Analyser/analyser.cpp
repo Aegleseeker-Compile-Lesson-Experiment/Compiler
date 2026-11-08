@@ -35,8 +35,7 @@ void Analyser::slr1_construct() {
 
 bool Analyser::slr1_analyse() {
     if (!is_slr1) return false;
-    slr1.analyse_slr1_sentence();
-    return true;
+    return slr1.analyse_slr1_sentence();
 }
 
 void Analyser::lr1_construct() {
@@ -49,8 +48,7 @@ void Analyser::lr1_construct() {
 
 bool Analyser::lr1_analyse() {
     if (!is_lr1) return false;
-    lr1.analyse_lr1_sentence();
-    return true;
+    return lr1.analyse_lr1_sentence();
 }
 
 void Analyser::lalr1_construct() {
@@ -65,6 +63,5 @@ void Analyser::lalr1_construct() {
 
 bool Analyser::lalr1_analyse() {
     if (!is_lalr1) return false;
-    lalr1.analyse_lalr1_sentence();
-    return true;
+    return lalr1.analyse_lalr1_sentence();
 }

@@ -5,6 +5,7 @@ namespace Global {
     const std::string START = "START";
     int production_index = 0;
     bool enable_solve_left_recursion = false;
+    bool enable_debug = false;
     bool is_left_recursion = false;
     std::string s = "";
     std::string start_symbol = "";
@@ -135,6 +136,18 @@ bool parse_enablesolveleftrecursion(const std::string &s) {
     return true;
 }
 
+bool parse_enabledebug(const std::string &s) {
+    const std::string model = "Enable Debug";
+    if (s != model) return false;
+    std::string line;
+    std::getline(Global::pre_file, line);
+    line = trim(line);
+    if (line == "true") {
+        Global::enable_debug = true;
+    }
+    return true;
+}
+
 bool parse_sentence(const std::string &s) {
     const std::string model = "Sentence";
     if (s != model) return false;
@@ -197,6 +210,13 @@ bool initial() {
             case State::EnableSolveLeftRecursion:
                 if (!parse_enablesolveleftrecursion(Global::s)) {
                     puts("Parse enable solve left recursion error!");
+                    return false;
+                }
+                state = State::EnableDebug;
+                break;
+            case State::EnableDebug:
+                if (!parse_enabledebug(Global::s)) {
+                    puts("Parse enable debug error!");
                     return false;
                 }
                 state = State::Sentence;

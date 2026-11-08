@@ -22,7 +22,7 @@
 #include <stack>
 #include <set>
 
-enum class State: int { TerminalSymbol, Non_TerminalSymbol, StartSymbol, Productions, EnableSolveLeftRecursion, Sentence, End };
+enum class State: int { TerminalSymbol, Non_TerminalSymbol, StartSymbol, Productions, EnableSolveLeftRecursion, EnableDebug, Sentence, End };
 enum class Symbol: int { TerminalSymbol, Non_TerminalSymbol };
 enum class Epsilon: int {Yes, No, Uncertained};
 enum class SLRAction: int {S, R, Accept};
@@ -33,6 +33,7 @@ namespace Global {
     extern const std::string START;
     extern int production_index;
     extern bool enable_solve_left_recursion;
+    extern bool enable_debug;
     extern bool is_left_recursion;
     extern std::string s;
     extern std::string start_symbol;
@@ -51,6 +52,7 @@ bool parse_non_terminalsymbol(const std::string &s);
 bool parse_startsymbol(const std::string &s);
 bool parse_productions(const std::string &s);
 bool parse_enablesolveleftrecursion(const std::string &s);
+bool parse_enabledebug(const std::string &s);
 bool parse_sentence(const std::string &s);
 bool initial();
 

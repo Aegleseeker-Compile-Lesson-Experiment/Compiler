@@ -216,16 +216,18 @@ void getfirst() {
         int id = scc_id[nt];
         Global::first[nt] = scc_first[id];
     }
-    puts("FIRST");
-    for (auto non_terminal_symbol : Global::non_terminal_symbols) {
-        std::cout << non_terminal_symbol << ": ";
-        for (auto f:Global::first[non_terminal_symbol]) {
-            if (f == "\\epsilon") f = "ε";
-            std::cout << f << " ";
+    if (Global::enable_debug) {
+        puts("FIRST");
+        for (auto non_terminal_symbol : Global::non_terminal_symbols) {
+            std::cout << non_terminal_symbol << ": ";
+            for (auto f:Global::first[non_terminal_symbol]) {
+                if (f == "\\epsilon") f = "ε";
+                std::cout << f << " ";
+            }
+            puts("");
         }
         puts("");
     }
-    puts("");
 }
 
 void getfollow() {
@@ -339,15 +341,17 @@ void getfollow() {
         int id = scc_id[nt];
         Global::follow[nt] = scc_follow[id];
     }
-    puts("FOLLOW");
-    for (const auto &non_terminal_symbol : Global::non_terminal_symbols) {
-        std::cout << non_terminal_symbol << ": ";
-        for (auto f : Global::follow[non_terminal_symbol]) {
-            std::cout << f << " ";
+    if (Global::enable_debug) {
+        puts("FOLLOW");
+        for (const auto &non_terminal_symbol : Global::non_terminal_symbols) {
+            std::cout << non_terminal_symbol << ": ";
+            for (auto f : Global::follow[non_terminal_symbol]) {
+                std::cout << f << " ";
+            }
+            puts("");
         }
         puts("");
     }
-    puts("");
 }
 
 void argumentation_grammar() {
@@ -435,19 +439,21 @@ void solve_left_recursion() {
             Global::non_terminal_symbols.push_back(new_symbol);
         }
     }
-    puts("After solve left recursion:");
-    for (const auto &non_terminal_symbol:Global::non_terminal_symbols) {
-        for (const auto &production:Global::productions[non_terminal_symbol]) {
-            std::cout << non_terminal_symbol << " → ";
-            for (const auto &symbol:production.second) {
-                auto output = symbol;
-                if (output == "\\epsilon") output = "ε";
-                std::cout << output << " ";
+    if (Global::enable_debug) {
+        puts("After solve left recursion:");
+        for (const auto &non_terminal_symbol:Global::non_terminal_symbols) {
+            for (const auto &production:Global::productions[non_terminal_symbol]) {
+                std::cout << non_terminal_symbol << " → ";
+                for (const auto &symbol:production.second) {
+                    auto output = symbol;
+                    if (output == "\\epsilon") output = "ε";
+                    std::cout << output << " ";
+                }
+                puts("");
             }
-            puts("");
         }
+        puts("");
     }
-    puts("");
 }
 
 FollowSymbols get_follow_symbols(ptrdiff_t cdot_position, const Production &production, const std::unordered_set<std::string> &follow_symbols) {
