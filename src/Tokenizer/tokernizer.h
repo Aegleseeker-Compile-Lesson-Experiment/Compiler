@@ -41,6 +41,8 @@ public:
     std::string getNext();
     void print();
     void print_to_sentence();
+    inline int get_utf8_char_len(unsigned char lead);
+    void report_illegal_sequence(int line, const std::string& invalid_chunk);
 };
 
 #endif // TOKENIZER_H

@@ -156,3 +156,31 @@ void Tokenizer::print_to_sentence() {
     Global::sentence.clear();
     Global::sentence.push_back(sentence);
 }
+
+inline int Tokenizer::get_utf8_char_len(unsigned char lead) {
+    if (lead < 0x80) return 1;
+    if ((lead >> 5) == 0x06) return 2;
+    if ((lead >> 4) == 0x0E) return 3;
+    if ((lead >> 3) == 0x1E) return 4;
+    return 1;
+}
+
+void Tokenizer::report_illegal_sequence(int line, const std::string& invalid_chunk) {
+    size_t pos = 0;
+    while (pos < invalid_chunk.size()) {
+        unsigned char lead = static_cast<unsigned char>(invalid_chunk[pos]);
+        int len = get_utf8_char_len(lead);
+        if (pos + len > invalid_chunk.size()) {
+            len = invalid_chunk.size() - pos;
+        }
+        std::string single_char = invalid_chunk.substr(pos, len);
+        if (single_char == "\\") {
+            std::cerr << line << " illegal character '\\\\'\n";
+        } else if (single_char == "\'") {
+            std::cerr << line << " illegal character \"\'\"\n";
+        } else {
+            std::cerr << line << " illegal character '" << single_char << "'\n";
+        }
+        pos += len;
+    }
+}
