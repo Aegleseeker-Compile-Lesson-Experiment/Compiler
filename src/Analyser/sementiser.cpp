@@ -3,6 +3,8 @@
 std::vector<std::pair<int, std::string>> Sementiser::check_error() {
     auto root = Global::ASTRoot;
     rootBlock = Block{{}, 0, nullptr};
+    functions.push_back(Func{FuncType::INT, "getint", {}});
+    functions.push_back(Func{FuncType::VOID, "putint", {"a"}});
     for (auto &function : root->children) {
         Func temp;
         temp.type = function->children[0]->data_type == DataType::INT ? FuncType::INT : FuncType::VOID;
@@ -105,7 +107,7 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         if (node->children.size() > 1) {
             dfs_op(node->children[1], block);
             temp.initial_value = node->children[1]->const_value;
-            temp.may_have_been_changed = !node->has_const_value;
+            temp.may_have_been_changed = !node->children[1]->has_const_value;
         }
         block->SymbolTable.push_back(temp);
     } else if (node->type == NodeType::ASSIGN_STMT) {

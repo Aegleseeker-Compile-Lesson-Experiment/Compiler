@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
         A.lr1_construct();
         A.lalr1_construct();
         int res = A.lalr1_analyse();
-        if (!res) {
+        if (res == -1) {
             Sementiser S;
             auto msg = S.check_error();
             if (msg.empty()) {
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
             } else {
                 puts("reject");
                 for (const auto &m : msg) {
-                    std::cout << m.first + 1 << " " << m.second << std::endl;
+                    std::cout << m.first << " " << m.second << std::endl;
                 }
             }
         } else {

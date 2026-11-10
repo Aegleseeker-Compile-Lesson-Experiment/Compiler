@@ -2,6 +2,6 @@ compiler
 *.svg
 .vscode
 .vscode/*
-damn
-damn/*
+cases
+cases/*
 test.c

@@ -6,8 +6,6 @@ Tokenizer::Tokenizer() {
     for (const auto &sym : SYMBOL) symbol.insert(sym);
     std::string s;
     bool in_comment = false;
-    bool may_be_eof = false;
-    int eof_line = -1;
     int line = 0;
     while (std::getline(std::cin, s)) {
         if (!s.empty() && s.back() == '\r') {
@@ -54,21 +52,13 @@ Tokenizer::Tokenizer() {
             t += s[i];
         }
         if (!in_comment) {
-            if (t == "") {
-                if (may_be_eof == false) {
-                    eof_line = line;
-                    may_be_eof = true;
-                }
-            } else {
-                may_be_eof = false;
-            }
             catch_token(t, line++, s.size());
         } else {
             line++;
         }
     }
     std::string eof = "$";
-    catch_token(eof, eof_line, 0);
+    catch_token(eof, line, 0);
 }
 
 bool Tokenizer::is_keyword(const std::string &s) {

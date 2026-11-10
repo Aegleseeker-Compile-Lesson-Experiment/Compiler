@@ -302,7 +302,7 @@ int LALR1::analyse_lalr1_sentence() {
             auto right_symbol = sentence[index].symbol;
             auto stack_copy = stack;
             if (analysis_table_lalr1.find({closure, right_symbol}) == analysis_table_lalr1.end()) {
-                return sentence[index].line + 1;
+                return sentence[index].line;
             }
             auto action = analysis_table_lalr1[{closure, right_symbol}].first;
             auto target = analysis_table_lalr1[{closure, right_symbol}].second;
@@ -390,5 +390,5 @@ int LALR1::analyse_lalr1_sentence() {
             }
         }
     }
-    return 0;
+    return -1;
 }
