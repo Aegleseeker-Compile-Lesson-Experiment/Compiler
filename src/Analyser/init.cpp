@@ -13,10 +13,11 @@ namespace Global {
     std::unordered_map<std::string, Epsilon> can_be_epsilon;
     std::vector<std::string> terminal_symbols;
     std::vector<std::string> non_terminal_symbols;
-    std::vector<std::vector<std::string>> sentence;
+    std::vector<std::vector<Token>> sentence;
     std::unordered_map<std::string, std::vector<std::pair<int, Production>>> productions;
     std::unordered_map<std::string, std::set<std::string>> first;
     std::unordered_map<std::string, std::set<std::string>> follow;
+    ASTNode* ASTRoot = nullptr;
 }
 
 bool parse_terminalsymbol(const std::string &s) {
@@ -148,30 +149,6 @@ bool parse_enabledebug(const std::string &s) {
     return true;
 }
 
-bool parse_sentence(const std::string &s) {
-    const std::string model = "Sentence";
-    if (s != model) return false;
-    std::string line, temp;
-    std::vector<std::string> sentence;
-    while(std::getline(Global::pre_file, line)) {
-        if (isblank(line)) return true;
-        line = trim(line);
-        for (size_t i = 0; i < line.size(); ++i) {
-            if (line[i] == ' ') {
-                sentence.push_back(temp);
-                temp = "";
-            } else {
-                temp += line[i];
-            }
-        }
-        sentence.push_back(temp);
-        Global::sentence.push_back(sentence);
-        sentence.clear();
-        temp = "";
-    }
-    return true;
-}
-
 bool initial() {
     State state = State::TerminalSymbol;
     while(std::getline(Global::pre_file, Global::s)) {
@@ -217,13 +194,6 @@ bool initial() {
             case State::EnableDebug:
                 if (!parse_enabledebug(Global::s)) {
                     puts("Parse enable debug error!");
-                    return false;
-                }
-                state = State::Sentence;
-                break;
-            case State::Sentence:
-                if (!parse_sentence(Global::s)) {
-                    puts("Parse Sentence error!");
                     return false;
                 }
                 state = State::End;

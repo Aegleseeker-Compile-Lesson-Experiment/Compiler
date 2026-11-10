@@ -1,10 +1,13 @@
 #include "tokernizer.h"
+#include "../Analyser/init.h"
 
 Tokenizer::Tokenizer() {
     for (const auto &kw : KEYWORD) keyword.insert(kw);
     for (const auto &sym : SYMBOL) symbol.insert(sym);
     std::string s;
     bool in_comment = false;
+    bool may_be_eof = false;
+    int eof_line = -1;
     int line = 0;
     while (std::getline(std::cin, s)) {
         if (!s.empty() && s.back() == '\r') {
@@ -51,11 +54,21 @@ Tokenizer::Tokenizer() {
             t += s[i];
         }
         if (!in_comment) {
+            if (t == "") {
+                if (may_be_eof == false) {
+                    eof_line = line;
+                    may_be_eof = true;
+                }
+            } else {
+                may_be_eof = false;
+            }
             catch_token(t, line++, s.size());
         } else {
             line++;
         }
     }
+    std::string eof = "$";
+    catch_token(eof, eof_line, 0);
 }
 
 bool Tokenizer::is_keyword(const std::string &s) {
@@ -77,16 +90,23 @@ bool Tokenizer::is_constant(const std::string &s) {
 
 void Tokenizer::catch_token(std::string &s, const int line, const int column) {
     if (s != "" && s != "\n" && s != "\t" && s != "\r") {
-        auto token = Token { TokenType::IDENTIFIER, s, line, column, 0 };
+        auto token = Token { TokenType::IDENTIFIER, s, "ID", line, column, 0 };
+        if (s == "$") {
+            token.type = TokenType::SP_EOF;
+            token.symbol = "$";
+        }
         if (is_constant(s)) {
             token.type = TokenType::CONSTANT;
+            token.symbol = "NUMBER";
             token.value = std::stoi(s);
         }
         if (is_keyword(s)) {
             token.type = TokenType::KEYWORD;
+            token.symbol = s;
         }
         if (is_symbol(s)) {
             token.type = TokenType::SYMBOL;
+            token.symbol = s;
         }
         tokens.push(token);
     }
@@ -120,21 +140,11 @@ void Tokenizer::print() {
 }
 
 void Tokenizer::print_to_sentence() {
-    std::vector<std::string> sentence;
+    std::vector<Token> sentence;
     while (!tokens.empty()) {
-        auto token = tokens.front();
+        sentence.push_back(tokens.front());
         tokens.pop();
-        if (token.type == TokenType::KEYWORD) {
-            sentence.push_back(token.lexeme);
-        } else if (token.type == TokenType::SYMBOL) {
-            sentence.push_back(token.lexeme);
-        } else if (token.type == TokenType::IDENTIFIER) {
-            sentence.push_back("ID");
-        } else if (token.type == TokenType::CONSTANT) {
-            sentence.push_back("NUMBER");
-        } else if (token.type == TokenType::STRING_LITERAL) {
-            sentence.push_back("404 Not Found");
-        }
     }
+    Global::sentence.clear();
     Global::sentence.push_back(sentence);
 }

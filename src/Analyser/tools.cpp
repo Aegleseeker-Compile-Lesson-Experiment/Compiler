@@ -61,7 +61,9 @@ std::pair<std::string, Production> getproduction(int index) {
             }
         }
     }
-    puts("Get production error!");
+    if (Global::enable_debug) {
+        puts("Get production error!");
+    }
     return {};
 }
 
@@ -488,4 +490,304 @@ FollowSymbols get_follow_symbols(ptrdiff_t cdot_position, const Production &prod
         }
     }
     return new_follow_symbols;
+}
+
+ASTNode* token_to_astnode(const Token &token) {
+    auto *node = new ASTNode(NodeType::RAW_TOKEN, token.lexeme, token.line, token.column);
+    if (token.type == TokenType::CONSTANT) {
+        node->type = NodeType::CONST_INT;
+        node->has_const_value = true;
+        node->const_value = token.value;
+    } else if (token.type == TokenType::IDENTIFIER) {
+        node->type = NodeType::IDENT;
+    } else if (token.lexeme == "int" || token.lexeme == "void") {
+        node->type = NodeType::TYPE;
+    } else {
+        node->type = NodeType::RAW_TOKEN;
+    }
+    return node;
+}
+
+void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Production rhs) {
+    int len = rhs.size();
+    std::vector<ASTNode*> children(len);
+    for (int i = len - 1; i >= 0; --i) {
+        children[i] = sem_stack.top();
+        sem_stack.pop();
+    }
+    ASTNode* result = nullptr;
+    if (lhs == "CompUnit") {
+        if (len == 2) {
+            // CompUnit -> CompUnit FuncDef
+            result = children[0];
+            result->children.push_back(children[1]);
+        } else {
+            // CompUnit -> FuncDef
+            result = new ASTNode(NodeType::COMP_UNIT, "CompUnit", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "FuncDef") {
+        if (len == 5) {
+            // FuncDef -> FuncType ID ( ) Block
+            result = new ASTNode(NodeType::FUNC_DEF, "FuncDef", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[4]);
+            delete children[2], delete children[3];
+        } else {
+            // FuncDef -> FuncType ID ( FuncFParams ) Block
+            result = new ASTNode(NodeType::FUNC_DEF, "FuncDef", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[3]);
+            result->children.push_back(children[5]);
+            delete children[2], delete children[4];
+        }
+    } else if (lhs == "FuncType") {
+        if (rhs[0] == "int" || rhs[0] == "void") {
+            // FuncType -> int | void
+            result = new ASTNode(NodeType::FUNC_TYPE, rhs[0], children[0]->line, children[0]->column);
+            result->data_type = rhs[0] == "int" ? DataType::INT : DataType::VOID;
+            delete children[0];
+        }
+    } else if (lhs == "FuncFParams") {
+        if (len == 3) {
+            // FuncFParams -> FuncFParams , Param
+            result = children[0];
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else {
+            // FuncFParams -> Param
+            result = new ASTNode(NodeType::FUNC_FPARAMS, "FuncFParams", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "Param") {
+        // Param -> int ID
+        result = new ASTNode(NodeType::PARAM, "Param", children[0]->line, children[0]->column);
+        result->children.push_back(children[1]);
+        delete children[0];
+    } else if (lhs == "Block") {
+        if (len == 2) {
+            // Block -> { }
+            result = new ASTNode(NodeType::BLOCK, "EmptyBlock", children[0]->line, children[0]->column);
+            delete children[0], delete children[1];
+        } else {
+            // Block -> { StmtList }
+            result = new ASTNode(NodeType::BLOCK, "Block", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
+        }
+    } else if (lhs == "StmtList") {
+        if (len == 2) {
+            // StmtList -> StmtList Stmt
+            result = children[0];
+            result->children.push_back(children[1]);
+        } else {
+            // StmtList -> Stmt
+            result = new ASTNode(NodeType::STMT_LIST, "StmtList", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "Stmt") {
+        // Stmt -> MatchedStmt
+        // Stmt -> OpenStmt
+        result = children[0];
+    } else if (lhs == "MatchedStmt") {
+        if (len == 7) {
+            // MatchedStmt -> if ( Expr ) MatchedStmt else MatchedStmt
+            result = new ASTNode(NodeType::IFELSE_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            result->children.push_back(children[6]);
+            delete children[0], delete children[1], delete children[3], delete children[5];
+        } else if (rhs[0] == "while") {
+            // MatchedStmt -> while ( Expr ) MatchedStmt
+            result = new ASTNode(NodeType::WHILE_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            delete children[0], delete children[1], delete children[3];
+        } else if (rhs[0] == "ID") {
+            // MatchedStmt -> ID = Expr ;
+            result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1], delete children[3];
+        } else if (len == 5) {
+            // MatchedStmt -> int ID = Expr ;
+            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[3]);
+            delete children[0], delete children[2], delete children[4];
+        } else if (rhs[0] == "const") {
+            // MatchedStmt -> const int ID = Expr ;
+            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            result->has_const_value = true;
+            delete children[0], delete children[1], delete children[3], delete children[5];
+        } else if (rhs[0] == "int") {
+            // MatchedStmt -> int ID ;
+            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
+        } else if (rhs[0] == "return" && len == 2) {
+            // MatchedStmt -> return ;
+            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
+            delete children[1];
+        } else if (rhs[0] == "return" && len == 3) {
+            // MatchedStmt -> return Expr ;
+            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
+        } else if (rhs[0] == "break") {
+            // MatchedStmt -> break ;
+            result = new ASTNode(NodeType::BREAK_STMT, "", children[0]->line, children[0]->column);
+            delete children[0], delete children[1];
+        } else if (rhs[0] == "continue") {
+            // MatchedStmt -> continue ;
+            result = new ASTNode(NodeType::CONTINUE_STMT, "", children[0]->line, children[0]->column);
+            delete children[0], delete children[1];
+        } else if (rhs[0] == "Block") {
+            // MatchedStmt -> Block
+            result = children[0];
+        } else if (rhs[0] == ";") {
+            // MatchedStmt -> ;
+            result = new ASTNode(NodeType::EMPTY_STMT, ";", children[0]->line, children[0]->column);
+            delete children[0];
+        } else {
+            // MatchedStmt -> Expr ;
+            result = children[0];
+        }
+    } else if (lhs == "OpenStmt") {
+        if (len == 7) {
+            // OpenStmt -> if ( Expr ) MatchedStmt else OpenStmt
+            result = new ASTNode(NodeType::IFELSE_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            result->children.push_back(children[6]);
+            delete children[0], delete children[1], delete children[3], delete children[5];
+        } else if (rhs[0] == "while") {
+            // OpenStmt -> while ( Expr ) OpenStmt
+            result = new ASTNode(NodeType::WHILE_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            delete children[0], delete children[1], delete children[3];
+        } else if (rhs[0] == "if") {
+            // OpenStmt -> if ( Expr ) Stmt
+            result = new ASTNode(NodeType::IF_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            delete children[0], delete children[1], delete children[3];
+        }
+    } else if (lhs == "Expr") {
+        // Expr -> LOrExpr
+        result = children[0];
+    } else if (lhs == "LOrExpr") {
+        if (len == 1) {
+            // LOrExpr -> LAndExpr
+            result = children[0];
+        } else {
+            // LOrExpr -> LOrExpr || LAndExpr
+            result = new ASTNode(NodeType::LOGIC_OP, "||", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        }
+    } else if (lhs == "LAndExpr") {
+        if (len == 1) {
+            // LAndExpr -> RelExpr
+            result = children[0];
+        } else {
+            // LAndExpr -> LAndExpr && RelExpr
+            result = new ASTNode(NodeType::LOGIC_OP, "&&", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        }
+    } else if (lhs == "RelExpr") {
+        if (len == 1) {
+            // RelExpr -> AddExpr
+            result = children[0];
+        } else {
+            // RelExpr -> RelExpr < AddExpr
+            // RelExpr -> RelExpr > AddExpr
+            // RelExpr -> RelExpr <= AddExpr
+            // RelExpr -> RelExpr >= AddExpr
+            // RelExpr -> RelExpr == AddExpr
+            // RelExpr -> RelExpr != AddExpr
+            result = new ASTNode(NodeType::REL_OP, rhs[1], children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        }
+    } else if (lhs == "AddExpr") {
+        if (len == 1) {
+            // AddExpr -> MulExpr
+            result = children[0];
+        } else {
+            // AddExpr -> AddExpr + MulExpr
+            // AddExpr -> AddExpr - MulExpr
+            result = new ASTNode(NodeType::ADD_OP, rhs[1], children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        }
+    } else if (lhs == "MulExpr") {
+        if (len == 1) {
+            // MulExpr -> UnaryExpr
+            result = children[0];
+        } else {
+            // MulExpr -> MulExpr * UnaryExpr
+            // MulExpr -> MulExpr / UnaryExpr
+            // MulExpr -> MulExpr % UnaryExpr
+            result = new ASTNode(NodeType::MUL_OP, rhs[1], children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        }
+    } else if (lhs == "UnaryExpr") {
+        if (len == 1) {
+            // UnaryExpr -> PrimaryExpr
+            result = children[0];
+        } else {
+            // UnaryExpr -> + UnaryExpr
+            // UnaryExpr -> - UnaryExpr
+            // UnaryExpr -> ! UnaryExpr
+            result = new ASTNode(NodeType::SINGLE_OP, rhs[0], children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0];
+        }
+    } else if (lhs == "PrimaryExpr") {
+        if (len == 3 && rhs[1] == "Expr") {
+            // PrimaryExpr -> ( Expr )
+            result = children[1];
+            delete children[0], delete children[2];
+        } else if (len == 3) {
+            // PrimaryExpr -> ID ( )
+            result = new ASTNode(NodeType::FUNC_CALL, "FuncCall", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            delete children[1], delete children[2];
+        } else if (len == 4) {
+            // PrimaryExpr -> ID ( FuncRParams )
+            result = new ASTNode(NodeType::FUNC_CALL, "FuncCall", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1], delete children[3];
+        } else if (rhs[0] == "ID" || rhs[0] == "NUMBER") {
+            // PrimaryExpr -> ID
+            // PrimaryExpr -> NUMBER
+            result = children[0];
+        }
+    } else {
+        if (len == 1) {
+            // FuncRParams -> Expr
+            result = new ASTNode(NodeType::FUNC_RPARAMS, "FuncRparams", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+        if (len == 3) {
+            // FuncRParams -> FuncRParams , Expr
+            result = children[0];
+            result->children.push_back(children[2]);
+        }
+    }
+    sem_stack.push(result);
 }

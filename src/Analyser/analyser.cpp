@@ -61,7 +61,7 @@ void Analyser::lalr1_construct() {
     is_lalr1 = lalr1.construct_lalr1_analysis_table();
 }
 
-bool Analyser::lalr1_analyse() {
+int Analyser::lalr1_analyse() {
     if (!is_lalr1) return false;
     return lalr1.analyse_lalr1_sentence();
 }

@@ -1,8 +1,6 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
-#include "../Analyser/init.h"
-
 #include <iostream>
 #include <string>
 #include <queue>
@@ -15,11 +13,13 @@ enum class TokenType {
     SYMBOL,
     IDENTIFIER,
     CONSTANT,
-    STRING_LITERAL
+    STRING_LITERAL,
+    SP_EOF
 };
 struct Token {
     TokenType type;
     std::string lexeme;
+    std::string symbol;
     int line;
     int column;
     int value; // Value if constant else 0.

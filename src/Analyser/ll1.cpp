@@ -90,14 +90,14 @@ void LL1::analyse_ll1_sentence() {
     for (auto sentence : Global::sentence) {
         std::cout << "Analyse ";
         for (const auto &symbol:sentence) {
-            std::cout << symbol << " ";
+            std::cout << symbol.lexeme << " ";
         }
         puts(":");
         std::stack<std::string> stack;
         stack.push(Global::start_symbol);
-        sentence.push_back("$");
+        sentence.push_back(Token{ TokenType::KEYWORD, "$", "$", 0, 0, 0 });
         for (size_t i = 0; i < sentence.size(); ++i) {
-            while(!stack.empty() && stack.top() != sentence[i]) {
+            while(!stack.empty() && stack.top() != sentence[i].lexeme) {
                 auto stack_copy = stack;
                 std::vector<std::string> stack_items;
                 while (!stack_copy.empty()) {
@@ -108,8 +108,8 @@ void LL1::analyse_ll1_sentence() {
                     if (*it == "\\epsilon") std::cout << "ε" << " ";
                     else std::cout << *it << " ";
                 }
-                std::cout << "| " << sentence[i] << std::endl;
-                auto production = predict_table[{stack.top(), sentence[i]}];
+                std::cout << "| " << sentence[i].lexeme << std::endl;
+                auto production = predict_table[{stack.top(), sentence[i].lexeme}];
                 stack.pop();
                 for (int j = production.size() - 1; j >= 0; --j) {
                     if (production[(size_t)j] != "\\epsilon") {
@@ -129,7 +129,7 @@ void LL1::analyse_ll1_sentence() {
             }
             if (!stack.empty()) {
                 stack.pop();
-                std::cout << "| " << sentence[i] << std::endl;
+                std::cout << "| " << sentence[i].lexeme << std::endl;
             } else {
                 std::cout << "accept" << std::endl;
                 puts("");

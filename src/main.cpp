@@ -3,6 +3,7 @@
 
 #include "Tokenizer/tokernizer.h"
 #include "Analyser/analyser.h"
+#include "Analyser/sementiser.h"
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -17,16 +18,24 @@ int main(int argc, char *argv[]) {
         Tokenizer T;
         Analyser A;
         T.print_to_sentence();
-        A.slr1_construct();
-        if (A.slr1_analyse()) {
-            puts("accept");
+        A.lr1_construct();
+        A.lalr1_construct();
+        int res = A.lalr1_analyse();
+        if (!res) {
+            Sementiser S;
+            auto msg = S.check_error();
+            if (msg.empty()) {
+                puts("accept");
+            } else {
+                puts("reject");
+                for (const auto &m : msg) {
+                    std::cout << m.first + 1 << " " << m.second << std::endl;
+                }
+            }
         } else {
             puts("reject");
+            printf("%d\n", res);
         }
-        // Main.lr1_construct();
-        // Main.lr1_analyse();
-        // Main.lalr1_construct();
-        // Main.lalr1_analyse();
     }
     return 0;
 }

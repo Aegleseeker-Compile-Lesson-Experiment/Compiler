@@ -79,5 +79,28 @@ false
 Enable Debug
 false
 
-Sentence
-int ID ( ) { const int ID = NUMBER ; const int ID = NUMBER ; }
+[Step 001] TopState:   0 | Lookahead: '     int' | Shift -> State 1
+[Step 002] TopState:   1 | Lookahead: '      ID' | Reduce: FuncType → int
+[Step 003] TopState:   5 | Lookahead: '      ID' | Shift -> State 7
+[Step 004] TopState:   7 | Lookahead: '       (' | Shift -> State 8
+[Step 005] TopState:   8 | Lookahead: '       )' | Shift -> State 9
+[Step 006] TopState:   9 | Lookahead: '       {' | Shift -> State 13
+[Step 007] TopState:  13 | Lookahead: '  return' | Shift -> State 28
+[Step 008] TopState:  28 | Lookahead: '  NUMBER' | Shift -> State 32
+[Step 009] TopState:  32 | Lookahead: '       ;' | Reduce: PrimaryExpr → NUMBER
+[Step 010] TopState:  45 | Lookahead: '       ;' | Reduce: UnaryExpr → PrimaryExpr
+[Step 011] TopState:  44 | Lookahead: '       ;' | Reduce: MulExpr → UnaryExpr
+[Step 012] TopState:  43 | Lookahead: '       ;' | Reduce: AddExpr → MulExpr
+[Step 013] TopState:  42 | Lookahead: '       ;' | Reduce: RelExpr → AddExpr
+[Step 014] TopState:  41 | Lookahead: '       ;' | Reduce: LAndExpr → RelExpr
+[Step 015] TopState:  40 | Lookahead: '       ;' | Reduce: LOrExpr → LAndExpr
+[Step 016] TopState:  39 | Lookahead: '       ;' | Reduce: Expr → LOrExpr
+[Step 017] TopState:  59 | Lookahead: '       ;' | Shift -> State 89
+[Step 018] TopState:  89 | Lookahead: '       }' | Reduce: MatchedStmt → return Expr ;
+[Step 019] TopState:  36 | Lookahead: '       }' | Reduce: Stmt → MatchedStmt
+[Step 020] TopState:  35 | Lookahead: '       }' | Reduce: StmtList → Stmt
+[Step 021] TopState:  34 | Lookahead: '       }' | Shift -> State 63
+[Step 022] TopState:  63 | Lookahead: '       $' | Reduce: Block → { StmtList }
+[Step 023] TopState:  14 | Lookahead: '       $' | Reduce: FuncDef → FuncType ID ( ) Block
+[Step 024] TopState:   4 | Lookahead: '       $' | Reduce: CompUnit → FuncDef
+[Step 025] TopState:   3 | Lookahead: '       $' | >>> ACCEPT <<<

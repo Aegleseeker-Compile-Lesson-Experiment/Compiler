@@ -165,59 +165,59 @@ void LALR1::print_lalr1_table() {
             goto_cols.push_back(nt);
         }
     }
-    const int W = 8;
-    int action_total_w = action_cols.size() * W;
-    int goto_total_w   = goto_cols.size() * W;
-    auto print_h_line = [&]() {
-        std::cout << "+-------+" << std::string(action_total_w, '-') << "+" << std::string(goto_total_w, '-') << "+\n";
-    };
-    if (Global::enable_debug) {
-        std::cout << "\nLALR(1) Parsing Table:\n";
-        print_h_line();
-        std::cout << "| " << std::left << std::setw(5) << " " << " |"
-                << std::setw(action_total_w / 2 + 3) << std::right << "ACTION"
-                << std::setw(action_total_w - (action_total_w / 2 + 3)) << " " << "|"
-                << std::setw(goto_total_w / 2 + 2) << std::right << "GOTO"
-                << std::setw(goto_total_w - (goto_total_w / 2 + 2)) << " " << "|\n";
-        std::cout << "| " << std::left << std::setw(5) << "State" << " |";
-        for (const auto& term : action_cols) {
-            std::cout << std::right << std::setw(W - 1) << term << " ";
-        }
-        std::cout << "|";
-        for (const auto& non_term : goto_cols) {
-            std::cout << std::right << std::setw(W - 1) << non_term << " ";
-        }
-        std::cout << "|\n";
-        print_h_line();
-        for (size_t i = 0; i < closure_lalr1.size(); ++i) {
-            std::cout << "| " << std::right << std::setw(5) << i << " |";
-            for (const auto& term : action_cols) {
-                std::string cell = "";
-                if (analysis_table_lalr1.count({i, term})) {
-                    auto act = analysis_table_lalr1[{i, term}];
-                    if (act.first == SLRAction::S) {
-                        cell = "s" + std::to_string(act.second);
-                    } else if (act.first == SLRAction::R) {
-                        cell = "r" + std::to_string(act.second);
-                    } else if (act.first == SLRAction::Accept) {
-                        cell = "acc";
-                    }
-                }
-                std::cout << std::right << std::setw(W - 1) << cell << " ";
-            }
-            std::cout << "|";
-            for (const auto& non_term : goto_cols) {
-                std::string cell = "";
-                if (goto_lalr1.count({i, non_term})) {
-                    cell = std::to_string(goto_lalr1[{i, non_term}]);
-                }
-                std::cout << std::right << std::setw(W - 1) << cell << " ";
-            }
-            std::cout << "|\n";
-        }
-        print_h_line();
-        std::cout << std::endl;
-    }
+    // const int W = 8;
+    // int action_total_w = action_cols.size() * W;
+    // int goto_total_w   = goto_cols.size() * W;
+    // auto print_h_line = [&]() {
+    //     std::cout << "+-------+" << std::string(action_total_w, '-') << "+" << std::string(goto_total_w, '-') << "+\n";
+    // };
+    // if (Global::enable_debug) {
+    //     std::cout << "\nLALR(1) Parsing Table:\n";
+    //     print_h_line();
+    //     std::cout << "| " << std::left << std::setw(5) << " " << " |"
+    //             << std::setw(action_total_w / 2 + 3) << std::right << "ACTION"
+    //             << std::setw(action_total_w - (action_total_w / 2 + 3)) << " " << "|"
+    //             << std::setw(goto_total_w / 2 + 2) << std::right << "GOTO"
+    //             << std::setw(goto_total_w - (goto_total_w / 2 + 2)) << " " << "|\n";
+    //     std::cout << "| " << std::left << std::setw(5) << "State" << " |";
+    //     for (const auto& term : action_cols) {
+    //         std::cout << std::right << std::setw(W - 1) << term << " ";
+    //     }
+    //     std::cout << "|";
+    //     for (const auto& non_term : goto_cols) {
+    //         std::cout << std::right << std::setw(W - 1) << non_term << " ";
+    //     }
+    //     std::cout << "|\n";
+    //     print_h_line();
+    //     for (size_t i = 0; i < closure_lalr1.size(); ++i) {
+    //         std::cout << "| " << std::right << std::setw(5) << i << " |";
+    //         for (const auto& term : action_cols) {
+    //             std::string cell = "";
+    //             if (analysis_table_lalr1.count({i, term})) {
+    //                 auto act = analysis_table_lalr1[{i, term}];
+    //                 if (act.first == SLRAction::S) {
+    //                     cell = "s" + std::to_string(act.second);
+    //                 } else if (act.first == SLRAction::R) {
+    //                     cell = "r" + std::to_string(act.second);
+    //                 } else if (act.first == SLRAction::Accept) {
+    //                     cell = "acc";
+    //                 }
+    //             }
+    //             std::cout << std::right << std::setw(W - 1) << cell << " ";
+    //         }
+    //         std::cout << "|";
+    //         for (const auto& non_term : goto_cols) {
+    //             std::string cell = "";
+    //             if (goto_lalr1.count({i, non_term})) {
+    //                 cell = std::to_string(goto_lalr1[{i, non_term}]);
+    //             }
+    //             std::cout << std::right << std::setw(W - 1) << cell << " ";
+    //         }
+    //         std::cout << "|\n";
+    //     }
+    //     print_h_line();
+    //     std::cout << std::endl;
+    // }
 }
 
 bool LALR1::construct_lalr1_analysis_table() {
@@ -265,44 +265,44 @@ bool LALR1::construct_lalr1_analysis_table() {
     return true;
 }
 
-bool LALR1::analyse_lalr1_sentence() {
+int LALR1::analyse_lalr1_sentence() {
     for (auto sentence : Global::sentence) {
-        if (Global::enable_debug) {
-            std::cout << "Analyse ";
-            for (const auto &symbol : sentence) {
-                std::cout << symbol << " ";
-            }
-            std::cout << ":\n";
-        }
-        const int W_STEP   = 5;
-        const int W_STATE  = 22;
-        const int W_SYMBOL = 20;
-        const int W_INPUT  = 20;
-        if (Global::enable_debug) {
-            std::cout << std::left 
-                    << std::setw(W_STEP)   << "Step"   << " | "
-                    << std::setw(W_STATE)  << "State"  << " | "
-                    << std::setw(W_SYMBOL) << "Symbol" << " | "
-                    << std::setw(W_INPUT)  << "Input"  << " | "
-                    << "Action\n";
-            std::cout << std::string(W_STEP, '-')   << "-+-"
-                    << std::string(W_STATE, '-')  << "-+-"
-                    << std::string(W_SYMBOL, '-') << "-+-"
-                    << std::string(W_INPUT, '-')  << "-+-"
-                    << "---------------------\n";
-        }
+        // if (Global::enable_debug) {
+        //     std::cout << "Analyse ";
+        //     for (const auto &symbol : sentence) {
+        //         std::cout << symbol << " ";
+        //     }
+        //     std::cout << ":\n";
+        // }
+        // const int W_STEP   = 5;
+        // const int W_STATE  = 22;
+        // const int W_SYMBOL = 20;
+        // const int W_INPUT  = 20;
+        // if (Global::enable_debug) {
+        //     std::cout << std::left 
+        //             << std::setw(W_STEP)   << "Step"   << " | "
+        //             << std::setw(W_STATE)  << "State"  << " | "
+        //             << std::setw(W_SYMBOL) << "Symbol" << " | "
+        //             << std::setw(W_INPUT)  << "Input"  << " | "
+        //             << "Action\n";
+        //     std::cout << std::string(W_STEP, '-')   << "-+-"
+        //             << std::string(W_STATE, '-')  << "-+-"
+        //             << std::string(W_SYMBOL, '-') << "-+-"
+        //             << std::string(W_INPUT, '-')  << "-+-"
+        //             << "---------------------\n";
+        // }
         int step = 0;
         int index = 0;
         std::stack<ClosureEntry> stack;
         stack.push({0, "$"});
-        sentence.push_back("$");
+        std::stack<ASTNode*> sem_stack;
         while (true) {
             step++;
             auto closure = stack.top().first;
-            auto right_symbol = sentence[index];
+            auto right_symbol = sentence[index].symbol;
             auto stack_copy = stack;
             if (analysis_table_lalr1.find({closure, right_symbol}) == analysis_table_lalr1.end()) {
-                return false;
+                return sentence[index].line + 1;
             }
             auto action = analysis_table_lalr1[{closure, right_symbol}].first;
             auto target = analysis_table_lalr1[{closure, right_symbol}].second;
@@ -326,7 +326,7 @@ bool LALR1::analyse_lalr1_sentence() {
             }
             std::ostringstream ss_input;
             for (size_t i = index; i < sentence.size(); ++i) {
-                ss_input << sentence[i] << " ";
+                ss_input << sentence[i].symbol << " ";
             }
             std::ostringstream ss_action;
             if (action == SLRAction::S) {
@@ -340,21 +340,43 @@ bool LALR1::analyse_lalr1_sentence() {
                 ss_action << "Accept";
             }
             if (Global::enable_debug) {
-                std::cout << std::left
-                        << std::setw(W_STEP)   << step            << " | "
-                        << std::setw(W_STATE)  << ss_state.str()  << " | "
-                        << std::setw(W_SYMBOL) << ss_symbol.str() << " | "
-                        << std::setw(W_INPUT)  << ss_input.str()  << " | "
-                        << ss_action.str() << "\n";
+                std::cout << "[Step " << std::setw(3) << std::setfill('0') << step << std::setfill(' ') << "] "
+                        << "TopState: " << std::setw(3) << closure 
+                        << " | Lookahead: '" << std::setw(8) << right_symbol << "' | ";
+
+                if (action == SLRAction::S) {
+                    std::cout << ANSI_CYAN << "Shift -> State " << target << ANSI_RESET << "\n";
+                } else if (action == SLRAction::R) {
+                    std::cout << ANSI_YELLOW << "Reduce: " << left << " → ";
+                    for (const auto& s : production) std::cout << s << " ";
+                    std::cout << ANSI_RESET << "\n";
+                } else if (action == SLRAction::Accept) {
+                    std::cout << ANSI_GREEN << ">>> ACCEPT <<<" << ANSI_RESET << "\n";
+                }
             }
+            // if (Global::enable_debug) {
+            //     std::cout << std::left
+            //             << std::setw(W_STEP)   << step            << " | "
+            //             << std::setw(W_STATE)  << ss_state.str()  << " | "
+            //             << std::setw(W_SYMBOL) << ss_symbol.str() << " | "
+            //             << std::setw(W_INPUT)  << ss_input.str()  << " | "
+            //             << ss_action.str() << "\n";
+            // }
             if (action == SLRAction::Accept) {
                 if (Global::enable_debug) {
                     std::cout << "\n";
                 }
+                if (Global::ASTRoot != nullptr) {
+                    delete Global::ASTRoot;
+                }
+                Global::ASTRoot = sem_stack.top();
                 break;
             }
             if (action == SLRAction::S) {
-                stack.push({target, sentence[index++]});
+                auto token = sentence[index++];
+                stack.push({target, token.symbol});
+                ASTNode* node = token_to_astnode(token);
+                sem_stack.push(node);
             }
             if (action == SLRAction::R) {
                 for (size_t i = 0; i < production.size(); ++i) {
@@ -364,8 +386,9 @@ bool LALR1::analyse_lalr1_sentence() {
                 }
                 auto new_target = analysis_table_lalr1[{stack.top().first, left}].second;
                 stack.push({new_target, left});
+                reduce_to_astnode(sem_stack, left, production);
             }
         }
     }
-    return true;
+    return 0;
 }

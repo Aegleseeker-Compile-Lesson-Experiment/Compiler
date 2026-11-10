@@ -24,7 +24,7 @@ public:
     void lr1_construct();
     bool lr1_analyse();
     void lalr1_construct();
-    bool lalr1_analyse();
+    int lalr1_analyse();
 };
 
 #endif // ANALYSER_H
