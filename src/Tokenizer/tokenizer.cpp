@@ -175,11 +175,11 @@ void Tokenizer::report_illegal_sequence(int line, const std::string& invalid_chu
         }
         std::string single_char = invalid_chunk.substr(pos, len);
         if (single_char == "\\") {
-            std::cerr << line << " illegal character '\\\\'\n";
+            std::cout << line << " illegal character '\\\\'" << std::endl;
         } else if (single_char == "\'") {
-            std::cerr << line << " illegal character \"\'\"\n";
+            std::cout << line << " illegal character \"\'\"" << std::endl;
         } else {
-            std::cerr << line << " illegal character '" << single_char << "'\n";
+            std::cout << line << " illegal character '" << single_char << "'" << std::endl;
         }
         pos += len;
     }
