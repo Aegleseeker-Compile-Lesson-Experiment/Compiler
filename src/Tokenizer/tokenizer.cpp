@@ -57,8 +57,8 @@ Tokenizer::Tokenizer() {
             line++;
         }
     }
-    std::string eof = "$";
-    catch_token(eof, line, 0);
+    auto token = Token { TokenType::SP_EOF, s, "$", line, 0, 0 };
+    tokens.push(token);
 }
 
 bool Tokenizer::is_keyword(const std::string &s) {
@@ -78,13 +78,23 @@ bool Tokenizer::is_constant(const std::string &s) {
     return true;
 }
 
+bool Tokenizer::is_identifier(const std::string &s) {
+    unsigned char first = static_cast<unsigned char>(s[0]);
+    if (!std::isalpha(first) && first != '_') {
+        return false;
+    }
+    for (size_t i = 1; i < s.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (!std::isalnum(c) && c != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
 void Tokenizer::catch_token(std::string &s, const int line, const int column) {
     if (s != "" && s != "\n" && s != "\t" && s != "\r") {
         auto token = Token { TokenType::IDENTIFIER, s, "ID", line, column, 0 };
-        if (s == "$") {
-            token.type = TokenType::SP_EOF;
-            token.symbol = "$";
-        }
         if (is_constant(s)) {
             token.type = TokenType::CONSTANT;
             token.symbol = "NUMBER";
@@ -98,7 +108,15 @@ void Tokenizer::catch_token(std::string &s, const int line, const int column) {
             token.type = TokenType::SYMBOL;
             token.symbol = s;
         }
-        tokens.push(token);
+        if (token.type == TokenType::IDENTIFIER) {
+            if (is_identifier(s)) {
+                tokens.push(token);
+            } else {
+                ill_symbol.push_back({line, s});
+            }
+        } else {
+            tokens.push(token);
+        }
     }
     s = "";
 }

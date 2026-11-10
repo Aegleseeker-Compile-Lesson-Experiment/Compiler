@@ -12,10 +12,60 @@ int main(int argc, char *argv[]) {
     }
     if (std::string(argv[1]) == "-token") {
         Tokenizer T;
+        if (!T.ill_symbol.empty()) {
+            puts("reject");
+            for (const auto &s : T.ill_symbol) {
+                if (s.second.size() > 1) {
+                    for (size_t i = 0; i < s.second.size(); ++i) {
+                        if (s.second[i] == '\\') {
+                            printf("%d illegal character '\\\\'\n", s.first);
+                        } else if (s.second[i] == '\'') {
+                            printf("%d illegal character '\''\n", s.first);
+                        } else {
+                            printf("%d illegal character '%c'\n", s.first, s.second[i]);
+                        }
+                    }
+                } else {
+                    if (s.second == "\\") {
+                        printf("%d illegal character '\\\\'\n", s.first);
+                    } else if (s.second == "\'") {
+                        printf("%d illegal character '\''\n", s.first);
+                    } else {
+                        printf("%d illegal character '%s'\n", s.first, s.second.c_str());
+                    }
+                }
+            }
+            puts("");
+        }
         T.print();
     }
     if (std::string(argv[1]) == "-ast") {
         Tokenizer T;
+        if (!T.ill_symbol.empty()) {
+            puts("reject");
+            for (const auto &s : T.ill_symbol) {
+                if (s.second.size() > 1) {
+                    for (size_t i = 0; i < s.second.size(); ++i) {
+                        if (s.second[i] == '\\') {
+                            printf("%d illegal character '\\\\'\n", s.first);
+                        } else if (s.second[i] == '\'') {
+                            printf("%d illegal character '\''\n", s.first);
+                        } else {
+                            printf("%d illegal character '%c'\n", s.first, s.second[i]);
+                        }
+                    }
+                } else {
+                    if (s.second == "\\") {
+                        printf("%d illegal character '\\\\'\n", s.first);
+                    } else if (s.second == "\'") {
+                        printf("%d illegal character '\''\n", s.first);
+                    } else {
+                        printf("%d illegal character '%s'\n", s.first, s.second.c_str());
+                    }
+                }
+            }
+            puts("");
+        }
         Analyser A;
         T.print_to_sentence();
         A.lr1_construct();

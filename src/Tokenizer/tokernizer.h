@@ -31,10 +31,12 @@ private:
     std::set<std::string> keyword;
     std::set<std::string> symbol;
 public:
+    std::vector<std::pair<int, std::string>> ill_symbol;
     Tokenizer();
     bool is_keyword(const std::string &s);
     bool is_symbol(const std::string &s);
     bool is_constant(const std::string &s);
+    bool is_identifier(const std::string &s);
     void catch_token(std::string &s, const int line, const int column);
     std::string getNext();
     void print();
