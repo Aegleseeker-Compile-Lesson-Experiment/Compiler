@@ -5,3 +5,5 @@ compiler
 cases
 cases/*
 test.c
+output.ll
+test_bin

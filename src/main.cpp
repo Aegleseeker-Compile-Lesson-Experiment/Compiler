@@ -3,7 +3,7 @@
 
 #include "Tokenizer/tokernizer.h"
 #include "Analyser/analyser.h"
-#include "Analyser/sementiser.h"
+#include "Sementiser/sementiser.h"
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {

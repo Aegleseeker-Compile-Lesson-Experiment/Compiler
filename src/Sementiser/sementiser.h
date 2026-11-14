@@ -1,13 +1,15 @@
 #ifndef SEMENTISER_H
 #define SEMENTISER_H
 
-#include "init.h"
+#include "../Analyser/init.h"
+#include "irgen.h"
 
 class Sementiser {
 private:
     std::vector<std::pair<int, std::string>> err_msg;
     std::vector<Func> functions;
     Block rootBlock;
+    IRGenerator ir;
 public:
     Sementiser() = default;
     ~Sementiser() = default;
@@ -19,8 +21,10 @@ public:
     void dfs_block(ASTNode *node, Block *block);
     void dfs_stmt_list(ASTNode *node, Block *block);
     void dfs_stmt(ASTNode *node, Block *block, int add_loop_layer);
-    void dfs_op(ASTNode *node, Block *block);
-    void dfs_func_rparams(ASTNode *node, Block *block);
+    std::string dfs_func(ASTNode *node, Block *block);
+    std::string dfs_op(ASTNode *node, Block *block);
+    std::string dfs_logical_op(ASTNode *node, Block *block);
+    std::vector<std::string> dfs_func_rparams(ASTNode *node, Block *block);
 };
 
 #endif // SEMENTISER_H

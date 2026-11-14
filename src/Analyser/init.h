@@ -66,13 +66,14 @@ struct Func {
 struct TableSymbol {
     DataType type;
     std::string name;
+    std::string ptr_name;
     int initial_value;
     bool is_const;
     bool may_have_been_changed; // 不能因被判定为 0 触发除零错误, 如果初值未确定, 也为 true
     TableSymbol() {}
     TableSymbol(std::string name): name(name) {}
-    TableSymbol(DataType type, std::string name, int initial_value, bool is_const, bool may_have_been_changed): 
-                type(type), name(name), initial_value(initial_value), is_const(is_const), may_have_been_changed(may_have_been_changed) {}
+    TableSymbol(DataType type, std::string name, std::string ptr_name, int initial_value, bool is_const, bool may_have_been_changed): 
+                type(type), name(name), ptr_name(ptr_name), initial_value(initial_value), is_const(is_const), may_have_been_changed(may_have_been_changed) {}
 };
 
 struct Block {
