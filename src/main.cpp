@@ -38,7 +38,7 @@ void print_token(const Token& token, std::size_t index) {
             break;
 
         case TokenKind::IntConst:
-            std::cout << "IntConst:" << token.lexeme;
+            std::cout << "IntConst:\"" << token.lexeme << '"';
             break;
 
         case TokenKind::Symbol:
@@ -92,10 +92,20 @@ int main(int argc, char* argv[]) {
     auto tokens = lexer.tokenize();
 
     if (mode == "-token") {
+        // Keep every diagnostic, including multiple errors on one line.
+        if (!lexer.ok()) {
+            std::cout << "reject\n";
+            for (const auto& diagnostic : lexer.diagnostics()) {
+                std::cout << diagnostic.line << ' '
+                          << diagnostic.message << '\n';
+            }
+            std::cout << '\n';
+        }
         for (std::size_t i = 0; i < tokens.size(); ++i) {
             print_token(tokens[i], i);
         }
-        return lexer.ok() ? 0 : 1;
+        // A lexical rejection is a normal evaluation result.
+        return 0;
     }
 
     // 实验二：语法分析

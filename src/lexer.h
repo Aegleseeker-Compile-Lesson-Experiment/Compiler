@@ -17,14 +17,22 @@ struct Token {
     std::size_t column;
 };
 
+struct LexicalDiagnostic {
+    std::size_t line; // zero-based
+    std::string message;
+};
+
 class Lexer {
 public:
     explicit Lexer(std::string source);
     std::vector<Token> tokenize();
     bool ok() const { return ok_; }
     const std::vector<std::size_t>& errorLines() const {
-    return error_lines_;
-}
+        return error_lines_;
+    }
+    const std::vector<LexicalDiagnostic>& diagnostics() const {
+        return diagnostics_;
+    }
 
 private:
     std::string source_;
@@ -39,4 +47,5 @@ private:
     void report_error(std::size_t line, std::size_t column,
                       const std::string& message);
     std::vector<std::size_t> error_lines_;
+    std::vector<LexicalDiagnostic> diagnostics_;
 };
