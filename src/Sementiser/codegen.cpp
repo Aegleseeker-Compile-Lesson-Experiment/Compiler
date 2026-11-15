@@ -67,14 +67,6 @@ void CodeGen::gen_func(const IRFunc& fn) {
     asm_out << fn.name << ":\n";
     if (frame_size <= 2048) {
         asm_out << "  addi sp, sp, -" << frame_size << "\n";
-    } else {
-        asm_out << "  li t3, -" << frame_size << "\n";
-        asm_out << "  add sp, sp, t3\n";
-    }
-    // emit_sw("ra", frame_size - 4, "sp");
-    // emit_sw("s0", frame_size - 8, "sp");
-    if (frame_size <= 2047) {
-        asm_out << "  addi sp, sp, -" << frame_size << "\n";
         asm_out << "  sd ra, " << (frame_size - 8) << "(sp)\n";
         asm_out << "  sd s0, " << (frame_size - 16) << "(sp)\n";
         asm_out << "  addi s0, sp, " << frame_size << "\n";
@@ -87,12 +79,8 @@ void CodeGen::gen_func(const IRFunc& fn) {
         asm_out << "  sd s0, -16(t3)\n";
         asm_out << "  mv s0, t3\n";
     }
-    if (frame_size <= 2047) {
-        asm_out << "  addi s0, sp, " << frame_size << "\n";
-    } else {
-        asm_out << "  li t3, " << frame_size << "\n";
-        asm_out << "  add s0, sp, t3\n";
-    }
+    // emit_sw("ra", frame_size - 4, "sp");
+    // emit_sw("s0", frame_size - 8, "sp");
     for (size_t i = 0; i < fn.params.size(); ++i) {
         int slot = get_slot(fn.params[i]);
         if (i < 8) {
