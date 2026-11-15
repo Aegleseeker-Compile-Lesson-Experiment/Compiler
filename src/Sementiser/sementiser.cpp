@@ -14,6 +14,10 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error() {
     std::ofstream ir_file("output.ll");
     ir_file << module_ir.str();
     ir_file.close();
+    // std::ofstream cg_file("test.s");
+    // cg_file << cg.generate(functions_ir);
+    // cg_file.close();
+    std::cout << cg.generate(functions_ir);
     return err_msg;
 }
 
@@ -75,23 +79,23 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         TableSymbol temp;
         temp.name = node->children[0]->text;
         temp.type = DataType::UNKNOWN;
-        if (node->children.size() > 1) {
-            temp.type = DataType::INT;
-        }
         temp.is_const = node->has_const_value;
         temp.may_have_been_changed = false;
         auto res = find_in_block(temp, block);
         auto ptr = "%" + node->children[0]->text + ".addr_" + std::to_string(ir.reg_id++);
         temp.ptr_name = ptr;
         ir.entry_allocas << "  " << ptr << " = alloca i32\n";
+        ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}});
         if (res->name != "") {
             add_error_message(node->line, "Symbol has been used in current scope.");
         } else {
             delete res;
         }
         if (node->children.size() > 1) {
+            temp.type = DataType::INT;
             auto init_val = dfs_op(node->children[1], block);
             ir.emit("store i32 " + init_val + ", ptr " + ptr);
+            ir.emit_inst({IROp::STORE, "", init_val, ptr, {}});
             temp.initial_value = node->children[1]->const_value;
             temp.may_have_been_changed = !node->children[1]->has_const_value;
         }
@@ -113,6 +117,7 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         res->may_have_been_changed = !node->children[1]->has_const_value;
         res->initial_value = node->children[1]->const_value;
         ir.emit("store i32 " + val + ", ptr " + res->ptr_name);
+        ir.emit_inst({IROp::STORE, "", val, res->ptr_name, {}});
     } else if (node->type == NodeType::IF_STMT) {
         auto then_label = ir.new_label();
         auto end_label = ir.new_label();
@@ -120,11 +125,13 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         auto cond_i1 = ir.new_reg();
         ir.emit(cond_i1 + " = icmp ne i32 " + cond_val + ", 0");
         ir.emit("br i1 " + cond_i1 + ", label %" + then_label + ", label %" + end_label);
+        ir.emit_inst({IROp::BR_COND, then_label, cond_val, end_label, {}});
         ir.block_terminated = true;
         ir.emit_label(then_label);
         dfs_stmt(node->children[1], block, 0);
         if (!ir.block_terminated) {
             ir.emit("br label %" + end_label);
+            ir.emit_inst({IROp::JMP, end_label, "", "", {}});
             ir.block_terminated = true;
         }
         ir.emit_label(end_label);
@@ -136,17 +143,20 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         auto cond_i1 = ir.new_reg();
         ir.emit(cond_i1 + " = icmp ne i32 " + cond_val + ", 0");
         ir.emit("br i1 " + cond_i1 + ", label %" + then_label + ", label %" + else_label);
+        ir.emit_inst({IROp::BR_COND, then_label, cond_val, else_label, {}});
         ir.block_terminated = true;
         ir.emit_label(then_label);
         dfs_stmt(node->children[1], block, 0);
         if (!ir.block_terminated) {
             ir.emit("br label %" + end_label);
+            ir.emit_inst({IROp::JMP, end_label, "", "", {}});
             ir.block_terminated = true;
         }
         ir.emit_label(else_label);
         dfs_stmt(node->children[2], block, 0);
         if (!ir.block_terminated) {
             ir.emit("br label %" + end_label);
+            ir.emit_inst({IROp::JMP, end_label, "", "", {}});
             ir.block_terminated = true;
         }
         ir.emit_label(end_label);
@@ -156,18 +166,21 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         auto body_label = ir.new_label();
         auto end_label = ir.new_label();
         ir.emit("br label %" + cond_label);
+        ir.emit_inst({IROp::JMP, cond_label, "", "", {}});
         ir.block_terminated = true;
         ir.emit_label(cond_label);
         auto cond_val = dfs_op(node->children[0], block);
         auto cond_i1 = ir.new_reg();
         ir.emit(cond_i1 + " = icmp ne i32 " + cond_val + ", 0");
         ir.emit("br i1 " + cond_i1 + ", label %" + body_label + ", label %" + end_label);
+        ir.emit_inst({IROp::BR_COND, body_label, cond_val, end_label, {}});
         ir.block_terminated = true;
         ir.loop_stack.push_back({cond_label, end_label});
         ir.emit_label(body_label);
         dfs_stmt(node->children[1], block, 1);
         if (!ir.block_terminated) {
             ir.emit("br label %" + cond_label);
+            ir.emit_inst({IROp::JMP, cond_label, "", "", {}});
             ir.block_terminated = true;
         }
         ir.loop_stack.pop_back();
@@ -178,12 +191,14 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
                 add_error_message(node->line, "Return void but function returns int.");
                 ir.emit("ret void");
             }
+            ir.emit_inst({IROp::RET, "", "", "", {}});
         } else {
             if (functions.back().type != FuncType::INT) {
                 add_error_message(node->line, "Return int but function returns void.");
             }
             auto ret_val = dfs_op(node->children[0], block);
             ir.emit("ret i32 " + ret_val);
+            ir.emit_inst({IROp::RET, "", ret_val, "", {}});
         }
         ir.block_terminated = true;
         node->has_return = true;
@@ -192,12 +207,14 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
             add_error_message(node->line, "Break happens outside of loop.");
         }
         ir.emit("br label %" + ir.loop_stack.back().second);
+        ir.emit_inst({IROp::JMP, ir.loop_stack.back().second, "", "", {}});
         ir.block_terminated = true;
     } else if (node->type == NodeType::CONTINUE_STMT) {
         if (block->loop_layers == 0) {
             add_error_message(node->line, "Continue happens outside of loop.");
         }
         ir.emit("br label %" + ir.loop_stack.back().first);
+        ir.emit_inst({IROp::JMP, ir.loop_stack.back().first, "", "", {}});
         ir.block_terminated = true;
     } else if (node->type == NodeType::FUNC_CALL) {
         auto func = find_in_functions(node->children[0]->text);
@@ -214,13 +231,15 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         std::string arg_str;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) arg_str += ", ";
-            arg_str += args[i];
+            arg_str += "i32 " + args[i];
         }
         if (func.type == FuncType::VOID) {
             ir.emit("call void @" + func.name + "(" + arg_str + ")");
+            ir.emit_inst({IROp::CALL, "", func.name, "", args});
         } else {
             auto reg = ir.new_reg();
             ir.emit(reg + " = call i32 @" + func.name + "(" + arg_str + ")");
+            ir.emit_inst({IROp::CALL, reg, func.name, "", args});
         }
     } else {
         // EMPTY_STMT
@@ -233,12 +252,17 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     ir.entry_allocas.clear();
     ir.ir_body.str("");
     ir.ir_body.clear();
+    ir.entry_allocas_insts.clear();
+    ir.body_insts.clear();
     ir.reg_id = 0;
     ir.label_id = 0;
     ir.block_terminated = false;
     Func temp;
     temp.type = node->children[0]->data_type == DataType::INT ? FuncType::INT : FuncType::VOID;
     temp.name = node->children[1]->text;
+    IRFunc ir_fn;
+    ir_fn.name = temp.name;
+    ir_fn.is_void = (temp.type == FuncType::VOID);
     if (temp.name == "main") {
         if (temp.type != FuncType::INT) {
             add_error_message(node->children[0]->line, "Main returns void.");
@@ -256,6 +280,8 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
         bool first_p = true;
         for (const auto &parameter : node->children[2]->children) {
             auto p_name = parameter->children[0]->text;
+            auto param_reg = "%" + p_name;
+            ir_fn.params.push_back(param_reg);
             if (first_p) {
                 first_p = false;
             } else {
@@ -264,9 +290,11 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
             param_sig += "i32 %" + p_name;
             auto ptr = "%" + p_name + ".addr_" + std::to_string(ir.reg_id++);
             ir.entry_allocas << "  " << ptr << " = alloca i32\n";
+            ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}});
             ir.emit("store i32 %" + p_name + ", ptr " + ptr);
-            rootBlock.SymbolTable.push_back(TableSymbol(DataType::INT, parameter->children[0]->text, ptr, 0, false, true));
-            temp.parameters.push_back(parameter->children[0]->text);
+            ir.emit_inst({IROp::STORE, "", param_reg, ptr, {}});
+            block->SymbolTable.push_back(TableSymbol(DataType::INT, p_name, ptr, 0, false, true));
+            temp.parameters.push_back(p_name);
         }
         functions.push_back(temp);
         dfs_block(node->children[3], block);
@@ -277,8 +305,10 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     if (!ir.block_terminated) {
         if (node->children[0]->data_type == DataType::VOID) {
             ir.emit("ret void");
+            ir.emit_inst({IROp::RET, "", "", "", {}});
         } else {
             ir.emit("ret i32 0");
+            ir.emit_inst({IROp::RET, "", "0", "", {}});
         }
     }
     std::ostringstream full_func;
@@ -287,6 +317,9 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     full_func << ir.entry_allocas.str();
     full_func << ir.ir_body.str();
     full_func << "}\n\n";
+    ir_fn.insts.insert(ir_fn.insts.end(), ir.entry_allocas_insts.begin(), ir.entry_allocas_insts.end());
+    ir_fn.insts.insert(ir_fn.insts.end(), ir.body_insts.begin(), ir.body_insts.end());
+    functions_ir.push_back(ir_fn);
     return full_func.str();
 }
 
@@ -311,14 +344,16 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         std::string arg_str;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) arg_str += ", ";
-            arg_str += args[i];
+            arg_str += "i32 " + args[i];
         }
         if (func.type == FuncType::VOID) {
             ir.emit("call void @" + func.name + "(" + arg_str + ")");
+            ir.emit_inst({IROp::CALL, "", func.name, "", args});
             return "";
         } else {
             auto reg = ir.new_reg();
             ir.emit(reg + " = call i32 @" + func.name + "(" + arg_str + ")");
+            ir.emit_inst({IROp::CALL, reg, func.name, "", args});
             return reg;
         }
     } else if (node->type == NodeType::CONST_INT) {
@@ -342,6 +377,7 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         }
         auto reg = ir.new_reg();
         ir.emit(reg + " = load i32, ptr " + res->ptr_name);
+        ir.emit_inst({IROp::LOAD, reg, res->ptr_name, "", {}});
         return reg;
     } else if (node->type == NodeType::SINGLE_OP) {
         auto val = dfs_op(node->children[0], block);
@@ -356,14 +392,17 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         if (node->text == "-") {
             auto reg = ir.new_reg();
             ir.emit(reg + " = sub i32 0, " + val);
+            ir.emit_inst({IROp::SUB, reg, "0", val, {}});
             return reg;
         }
         if (node->text == "!") {
             auto cmp = ir.new_reg();
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(cmp + " = icmp eq i32 " + val + ", 0");
-            ir.emit(ext + " = zext i1 " + cmp + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + cmp + " to i32");
+            ir.emit_inst({IROp::ICMP_EQ, cmp, val, "0", {}});
+            // return ext;
+            return cmp;
         }
         return val;
     } else {
@@ -379,59 +418,74 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         node->has_const_value = node->children[0]->has_const_value && node->children[1]->has_const_value;
         if (node->text == "<") {
             node->const_value = value0 < value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp slt i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_SLT, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == ">") {
             node->const_value = value0 > value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sgt i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_SGT, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == "<=") {
             node->const_value = value0 <= value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sle i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_SLE, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == ">=") {
             node->const_value = value0 >= value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sge i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_SGE, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == "==") {
             node->const_value = value0 == value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp eq i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_EQ, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == "!=") {
             node->const_value = value0 != value1;
-            auto ext = ir.new_reg();
+            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp ne i32 " + lhs + ", " + rhs);
-            ir.emit(ext + " = zext i1 " + reg + " to i32");
-            return ext;
+            // ir.emit(ext + " = zext i1 " + reg + " to i32");
+            ir.emit_inst({IROp::ICMP_NE, reg, lhs, rhs, {}});
+            // return ext;
+            return reg;
         }
         if (node->text == "+") {
             node->const_value = value0 + value1;
             ir.emit(reg + " = add i32 " + lhs + ", " + rhs);
+            ir.emit_inst({IROp::ADD, reg, lhs, rhs, {}});
             return reg;
         }
         if (node->text == "-") {
             node->const_value = value0 - value1;
             ir.emit(reg + " = sub i32 " + lhs + ", " + rhs);
+            ir.emit_inst({IROp::SUB, reg, lhs, rhs, {}});
             return reg;
         }
         if (node->text == "*") {
             node->const_value = value0 * value1;
             ir.emit(reg + " = mul i32 " + lhs + ", " + rhs);
+            ir.emit_inst({IROp::MUL, reg, lhs, rhs, {}});
             return reg;
         }
         if (node->text == "/") {
@@ -442,6 +496,7 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
                 node->const_value = value0 / value1;
             }
             ir.emit(reg + " = sdiv i32 " + lhs + ", " + rhs);
+            ir.emit_inst({IROp::SDIV, reg, lhs, rhs, {}});
             return reg;
         }
         if (node->text == "%") {
@@ -452,6 +507,7 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
                 node->const_value = value0 % value1;
             }
             ir.emit(reg + " = srem i32 " + lhs + ", " + rhs);
+            ir.emit_inst({IROp::SREM, reg, lhs, rhs, {}});
             return reg;
         }
     }
@@ -470,9 +526,13 @@ std::string Sementiser::dfs_logical_op(ASTNode *node, Block *block) {
     if (is_and) {
         ir.emit("store i32 0, ptr " + res_ptr);
         ir.emit("br i1 " + cond1 + ", label %" + rhs_label + ", label %" + end_label);
+        ir.emit_inst({IROp::STORE, "", "0", res_ptr, {}});
+        ir.emit_inst({IROp::BR_COND, rhs_label, lhs, end_label, {}});
     } else {
         ir.emit("store i32 1, ptr " + res_ptr);
         ir.emit("br i1 " + cond1 + ", label %" + end_label + ", label %" + rhs_label);
+        ir.emit_inst({IROp::STORE, "", "1", res_ptr, {}});
+        ir.emit_inst({IROp::BR_COND, end_label, lhs, rhs_label, {}});
     }
     ir.block_terminated = true;
     ir.emit_label(rhs_label);
@@ -480,12 +540,17 @@ std::string Sementiser::dfs_logical_op(ASTNode *node, Block *block) {
     auto cond2 = ir.new_reg();
     auto ext2 = ir.new_reg();
     ir.emit(cond2 + " = icmp ne i32 " + rhs + ", 0");
+    ir.emit(ext2 + " = zext i1 " + cond2 + " to i32");
     ir.emit("store i32 " + ext2 + ", ptr " + res_ptr);
     ir.emit("br label %" + end_label);
+    ir.emit_inst({IROp::ICMP_NE, cond2, rhs, "0", {}});
+    ir.emit_inst({IROp::STORE, "", cond2, res_ptr, {}});
+    ir.emit_inst({IROp::JMP, end_label, "", "", {}});
     ir.block_terminated = true;
     ir.emit_label(end_label);
     auto final_reg = ir.new_reg();
     ir.emit(final_reg + " = load i32, ptr " + res_ptr);
+    ir.emit_inst({IROp::LOAD, final_reg, res_ptr, "", {}});
     if (node->children[0]->has_const_value && node->children[1]->has_const_value) {
         int value0 = node->children[0]->const_value;
         int value1 = node->children[1]->const_value;
@@ -501,7 +566,7 @@ std::string Sementiser::dfs_logical_op(ASTNode *node, Block *block) {
 std::vector<std::string> Sementiser::dfs_func_rparams(ASTNode *node, Block *block) {
     std::vector<std::string> args;
     for (const auto &parameter : node->children) {
-        args.push_back("i32 " + dfs_op(parameter, block));
+        args.push_back(dfs_op(parameter, block));
     }
     return args;
 }

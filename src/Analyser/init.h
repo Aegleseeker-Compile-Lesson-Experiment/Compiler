@@ -43,6 +43,12 @@ enum class NodeType {
     CONST_INT, IDENT,
     TYPE, RAW_TOKEN
 };
+enum class IROp {
+    ALLOCA, LOAD, STORE,
+    ADD, SUB, MUL, SDIV, SREM,
+    ICMP_EQ, ICMP_NE, ICMP_SLT, ICMP_SGT, ICMP_SLE, ICMP_SGE,
+    LABEL, JMP, BR_COND, CALL, RET
+};
 
 struct ASTNode {
     NodeType type;
@@ -80,6 +86,21 @@ struct Block {
     std::vector<TableSymbol> SymbolTable;
     int loop_layers;
     Block *fth;
+};
+
+struct IRInst {
+    IROp op;
+    std::string dst;
+    std::string src1;
+    std::string src2;
+    std::vector<std::string> args;
+};
+
+struct IRFunc {
+    std::string name;
+    bool is_void = false;
+    std::vector<std::string> params;
+    std::vector<IRInst> insts;
 };
 
 namespace Global {

@@ -3,13 +3,16 @@
 
 #include "../Analyser/init.h"
 #include "irgen.h"
+#include "codegen.h"
 
 class Sementiser {
 private:
     std::vector<std::pair<int, std::string>> err_msg;
     std::vector<Func> functions;
+    std::vector<IRFunc> functions_ir;
     Block rootBlock;
     IRGenerator ir;
+    CodeGen cg;
 public:
     Sementiser() = default;
     ~Sementiser() = default;

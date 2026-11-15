@@ -51,5 +51,22 @@ int main(int argc, char *argv[]) {
             printf("%d\n", res);
         }
     }
+    if (std::string(argv[1]) == "-asm") {
+        Tokenizer T;
+        if (!T.ill_symbol.empty()) {
+            /* Assume this case won't cause fault. */
+        }
+        Analyser A;
+        T.print_to_sentence();
+        A.lr1_construct();
+        A.lalr1_construct();
+        int res = A.lalr1_analyse();
+        if (res == -1) {
+            Sementiser S;
+            auto _ = S.check_error();
+        } else {
+            /* Similarly */
+        }
+    }
     return 0;
 }

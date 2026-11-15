@@ -6,14 +6,14 @@ void IRGenerator::emit(const std::string& inst) {
     }
 }
 
-void IRGenerator::emit_label(const std::string& label) {
-    ir_body << label << ":\n";
-    block_terminated = false;
+void IRGenerator::emit_inst(const IRInst& inst) {
+    if (!block_terminated) {
+        body_insts.push_back(inst);
+    }
 }
 
-IRGenerator::VarInfo* IRGenerator::lookup_var(const std::string& name) {
-    for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-        if (it->count(name)) return &((*it)[name]);
-    }
-    return nullptr;
+void IRGenerator::emit_label(const std::string& label) {
+    ir_body << label << ":\n";
+    body_insts.push_back({IROp::LABEL, label, "", "", {}});
+    block_terminated = false;
 }
