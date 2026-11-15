@@ -255,7 +255,6 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     ir.entry_allocas_insts.clear();
     ir.body_insts.clear();
     ir.reg_id = 0;
-    ir.label_id = 0;
     ir.block_terminated = false;
     Func temp;
     temp.type = node->children[0]->data_type == DataType::INT ? FuncType::INT : FuncType::VOID;
@@ -489,22 +488,26 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
             return reg;
         }
         if (node->text == "/") {
-            if (value1 == 0) {
-                add_error_message(node->children[1]->line, "0 is appeared as division number.");
-                node->has_const_value = false;
-            } else {
-                node->const_value = value0 / value1;
+            if (node->has_const_value) {
+                if (value1 == 0) {
+                    add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    node->has_const_value = false;
+                } else {
+                    node->const_value = value0 / value1;
+                }
             }
             ir.emit(reg + " = sdiv i32 " + lhs + ", " + rhs);
             ir.emit_inst({IROp::SDIV, reg, lhs, rhs, {}});
             return reg;
         }
         if (node->text == "%") {
-            if (value1 == 0) {
-                add_error_message(node->children[1]->line, "0 is appeared as division number.");
-                node->has_const_value = false;
-            } else {
-                node->const_value = value0 % value1;
+            if (node->has_const_value) {
+                if (value1 == 0) {
+                    add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    node->has_const_value = false;
+                } else {
+                    node->const_value = value0 % value1;
+                }
             }
             ir.emit(reg + " = srem i32 " + lhs + ", " + rhs);
             ir.emit_inst({IROp::SREM, reg, lhs, rhs, {}});
