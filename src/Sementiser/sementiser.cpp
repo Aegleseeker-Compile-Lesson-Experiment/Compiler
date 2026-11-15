@@ -1,6 +1,6 @@
 #include "sementiser.h"
 
-std::vector<std::pair<int, std::string>> Sementiser::check_error() {
+std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) {
     auto root = Global::ASTRoot;
     rootBlock = Block{{}, 0, nullptr};
     functions.push_back(Func{FuncType::INT, "getint", {}});
@@ -17,7 +17,9 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error() {
     // std::ofstream cg_file("test.s");
     // cg_file << cg.generate(functions_ir);
     // cg_file.close();
-    std::cout << cg.generate(functions_ir);
+    if (gen_code) {
+        std::cout << cg.generate(functions_ir);
+    }
     return err_msg;
 }
 

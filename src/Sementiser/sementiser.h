@@ -16,7 +16,7 @@ private:
 public:
     Sementiser() = default;
     ~Sementiser() = default;
-    std::vector<std::pair<int, std::string>> check_error();
+    std::vector<std::pair<int, std::string>> check_error(bool gen_code);
     void add_error_message(int line, std::string msg);
     TableSymbol* find_in_block(TableSymbol symbol, Block *block);
     TableSymbol* find_in_blocks(TableSymbol symbol, Block *block);
