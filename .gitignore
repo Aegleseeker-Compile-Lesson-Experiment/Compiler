@@ -10,3 +10,6 @@ build/
 # 临时文件
 *.out
 *.exe
+
+# Generated Makefile dependency files
+*.d

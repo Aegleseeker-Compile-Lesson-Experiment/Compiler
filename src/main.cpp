@@ -1,6 +1,7 @@
 
 #include "lexer.h"
 #include "parser.h"
+#include "semantic.h"
 
 #include <iostream>
 #include <iterator>
@@ -139,14 +140,23 @@ int main(int argc, char* argv[]) {
     );
 
 
+    std::unique_ptr<Program> ast;
     try {
-        auto ast = parser.parseProgram();
-        (void)ast;
+        ast = parser.parseProgram();
     } catch (const SyntaxError&) {
-     // 兜底：错误已经由 Parser 记录
+        // The parser already recorded its diagnostics.
     }
 
     std::vector<std::size_t> errors = parser.errorLines();
+    if (errors.empty() && ast) {
+        SourceLocation last_line = get_eof_location(source);
+        // A final newline terminates the last physical source line.
+        if (!source.empty() && source.back() == '\n' && last_line.line > 1)
+            --last_line.line;
+        SemanticAnalyzer semantic;
+        semantic.analyze(*ast, last_line);
+        errors = semantic.errorLines();
+    }
 
     if (errors.empty()) {
         std::cout << "accept\n";

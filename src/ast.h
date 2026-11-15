@@ -183,11 +183,12 @@ struct While : Stmt {
 
 
 struct Block : Stmt {
+    SourceLocation end_loc;  // location of the closing brace
     std::vector<std::unique_ptr<Stmt>> statements;
 
     Block(SourceLocation loc,
           std::vector<std::unique_ptr<Stmt>> stmts)
-        : Stmt(loc),
+        : Stmt(loc), end_loc(loc),
           statements(std::move(stmts)) {}
 };
 

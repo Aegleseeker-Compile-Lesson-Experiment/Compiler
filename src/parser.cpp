@@ -331,7 +331,7 @@ std::unique_ptr<Stmt> Parser::parseStmt() {
         expect(";");
 
         return std::make_unique<Decl>(
-            loc,
+            SourceLocation{name.line, name.column},
             name.lexeme,
             std::move(initializer),
             is_const
@@ -486,12 +486,14 @@ std::unique_ptr<Block> Parser::parseBlock() {
         );
     }
 
-    expect("}");
+    Token end = expect("}");
 
-    return std::make_unique<Block>(
+    auto block = std::make_unique<Block>(
         SourceLocation{start.line, start.column},
         std::move(statements)
     );
+    block->end_loc = SourceLocation{end.line, end.column};
+    return block;
 }
 
 
@@ -536,7 +538,7 @@ std::unique_ptr<Function> Parser::parseFunction() {
     auto body = parseBlock();
 
     return std::make_unique<Function>(
-        SourceLocation{type.line, type.column},
+        SourceLocation{name.line, name.column},
         type.lexeme,
         name.lexeme,
         std::move(params),
