@@ -73,8 +73,20 @@ void CodeGen::gen_func(const IRFunc& fn) {
     }
     // emit_sw("ra", frame_size - 4, "sp");
     // emit_sw("s0", frame_size - 8, "sp");
-    asm_out << "  sd ra, " << (frame_size - 8) << "(sp)\n";
-    asm_out << "  sd s0, " << (frame_size - 16) << "(sp)\n";
+    if (frame_size <= 2047) {
+        asm_out << "  addi sp, sp, -" << frame_size << "\n";
+        asm_out << "  sd ra, " << (frame_size - 8) << "(sp)\n";
+        asm_out << "  sd s0, " << (frame_size - 16) << "(sp)\n";
+        asm_out << "  addi s0, sp, " << frame_size << "\n";
+    } else {
+        asm_out << "  li t3, -" << frame_size << "\n";
+        asm_out << "  add sp, sp, t3\n";
+        asm_out << "  li t3, " << frame_size << "\n";
+        asm_out << "  add t3, sp, t3\n";
+        asm_out << "  sd ra, -8(t3)\n";
+        asm_out << "  sd s0, -16(t3)\n";
+        asm_out << "  mv s0, t3\n";
+    }
     if (frame_size <= 2047) {
         asm_out << "  addi s0, sp, " << frame_size << "\n";
     } else {
