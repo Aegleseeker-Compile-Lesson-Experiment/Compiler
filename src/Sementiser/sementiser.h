@@ -25,7 +25,7 @@ public:
     void dfs_stmt_list(ASTNode *node, Block *block);
     void dfs_stmt(ASTNode *node, Block *block, int add_loop_layer);
     std::string dfs_func(ASTNode *node, Block *block);
-    std::string dfs_op(ASTNode *node, Block *block);
+    std::string dfs_op(ASTNode *node, Block *block, bool block_error = false);
     std::string dfs_logical_op(ASTNode *node, Block *block);
     std::vector<std::string> dfs_func_rparams(ASTNode *node, Block *block);
 };

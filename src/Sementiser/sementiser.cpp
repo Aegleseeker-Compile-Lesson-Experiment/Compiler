@@ -207,17 +207,19 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
     } else if (node->type == NodeType::BREAK_STMT) {
         if (block->loop_layers == 0) {
             add_error_message(node->line, "Break happens outside of loop.");
+        } else {
+            ir.emit("br label %" + ir.loop_stack.back().second);
+            ir.emit_inst({IROp::JMP, ir.loop_stack.back().second, "", "", {}});
+            ir.block_terminated = true;
         }
-        ir.emit("br label %" + ir.loop_stack.back().second);
-        ir.emit_inst({IROp::JMP, ir.loop_stack.back().second, "", "", {}});
-        ir.block_terminated = true;
     } else if (node->type == NodeType::CONTINUE_STMT) {
         if (block->loop_layers == 0) {
             add_error_message(node->line, "Continue happens outside of loop.");
+        } else {
+            ir.emit("br label %" + ir.loop_stack.back().first);
+            ir.emit_inst({IROp::JMP, ir.loop_stack.back().first, "", "", {}});
+            ir.block_terminated = true;
         }
-        ir.emit("br label %" + ir.loop_stack.back().first);
-        ir.emit_inst({IROp::JMP, ir.loop_stack.back().first, "", "", {}});
-        ir.block_terminated = true;
     } else if (node->type == NodeType::FUNC_CALL) {
         auto func = find_in_functions(node->children[0]->text);
         if (func.type == FuncType::NOTFOUND) {
@@ -324,18 +326,24 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     return full_func.str();
 }
 
-std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
+std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
     if (node->type == NodeType::FUNC_CALL) {
         auto func = find_in_functions(node->children[0]->text);
         if (func.type == FuncType::NOTFOUND) {
-            add_error_message(node->children[0]->line, "Function not defined.");
+            if (!block_error) {
+                add_error_message(node->children[0]->line, "Function not defined.");
+            }
         }
         if (func.type == FuncType::VOID) {
-            add_error_message(node->children[0]->line, "Function returns void but used as value.");
+            if (!block_error) {
+                add_error_message(node->children[0]->line, "Function returns void but used as value.");
+            }
         }
         if ((!func.parameters.empty() && (node->children.size() == 1 || func.parameters.size() != node->children[1]->children.size())) ||
             (func.parameters.empty() && node->children.size() != 1)) {
-            add_error_message(node->children[0]->line, "Number of function parameters not matched.");
+            if (!block_error) {
+                add_error_message(node->children[0]->line, "Number of function parameters not matched.");
+            }
         }
         std::vector<std::string> args;
         if (!func.parameters.empty() && node->children.size() != 1) {
@@ -364,7 +372,9 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         temp.name = node->text;
         auto res = find_in_blocks(temp, block);
         if (res->name == "") {
-            add_error_message(node->line, "Symbol not declared before.");
+            if (!block_error) {
+                add_error_message(node->line, "Symbol not declared before.");
+            }
             delete res;
         }
         if (res->may_have_been_changed) {
@@ -492,7 +502,9 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block) {
         if (node->text == "/") {
             if (node->has_const_value) {
                 if (value1 == 0) {
-                    add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    if (!block_error) {
+                        add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    }
                     node->has_const_value = false;
                 } else {
                     node->const_value = value0 / value1;
@@ -541,7 +553,13 @@ std::string Sementiser::dfs_logical_op(ASTNode *node, Block *block) {
     }
     ir.block_terminated = true;
     ir.emit_label(rhs_label);
-    auto rhs = dfs_op(node->children[1], block);
+    std::string rhs;
+    if ((node->text == "||" && node->children[0]->has_const_value && node->children[0]->const_value) ||
+        (node->text == "&&" && node->children[0]->has_const_value && !node->children[0]->const_value)) {
+        rhs = dfs_op(node->children[1], block, true);
+    } else {
+        rhs = dfs_op(node->children[1], block, false);
+    }
     auto cond2 = ir.new_reg();
     auto ext2 = ir.new_reg();
     ir.emit(cond2 + " = icmp ne i32 " + rhs + ", 0");
