@@ -322,6 +322,7 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     full_func << "}\n\n";
     ir_fn.insts.insert(ir_fn.insts.end(), ir.entry_allocas_insts.begin(), ir.entry_allocas_insts.end());
     ir_fn.insts.insert(ir_fn.insts.end(), ir.body_insts.begin(), ir.body_insts.end());
+    optimize_ir(ir_fn);
     functions_ir.push_back(ir_fn);
     return full_func.str();
 }

@@ -2,6 +2,7 @@
 #define SEMENTISER_H
 
 #include "../Analyser/init.h"
+#include "../Optimizer/optimizer.h"
 #include "irgen.h"
 #include "codegen.h"
 

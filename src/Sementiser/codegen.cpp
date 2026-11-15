@@ -79,8 +79,6 @@ void CodeGen::gen_func(const IRFunc& fn) {
         asm_out << "  sd s0, -16(t3)\n";
         asm_out << "  mv s0, t3\n";
     }
-    // emit_sw("ra", frame_size - 4, "sp");
-    // emit_sw("s0", frame_size - 8, "sp");
     for (size_t i = 0; i < fn.params.size(); ++i) {
         int slot = get_slot(fn.params[i]);
         if (i < 8) {
@@ -95,8 +93,6 @@ void CodeGen::gen_func(const IRFunc& fn) {
         gen_inst(inst);
     }
     asm_out << epilogue_label << ":\n";
-    // emit_lw("ra", -4, "s0");
-    // emit_lw("s0", -8, "s0");
     asm_out << "  ld ra, -8(s0)\n";
     asm_out << "  ld s0, -16(s0)\n";
     if (frame_size <= 2047) {
