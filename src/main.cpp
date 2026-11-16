@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
         if (res == -1) {
             Sementiser S;
             auto msg = S.check_error(false);
+            // auto msg = S.check_error(true);
             if (msg.empty()) {
                 puts("accept");
             } else {

@@ -135,7 +135,7 @@ void optimize_ir(IRFunc& fn) {
                 if (op == IROp::CALL || op == IROp::RET) break;
                 if (op == IROp::BR_COND && b == 0) {
                     if (i + 1 < fn.insts.size() && fn.insts[i + 1].op == IROp::LABEL && fn.insts[i + 1].dst == fn.insts[i].dst) {
-                        b = i + 1;
+                        b = ++i;
                     } else break;
                 } else if (op == IROp::JMP && b != 0) {
                     if (fn.insts[i].dst == l_cond && i + 1 < fn.insts.size() &&

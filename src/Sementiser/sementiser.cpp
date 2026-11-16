@@ -6,8 +6,6 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     functions.push_back(Func{FuncType::INT, "getint", {}});
     functions.push_back(Func{FuncType::VOID, "putint", {"a"}});
     std::ostringstream module_ir;
-    // module_ir << "declare i32 @getint()\n";
-    // module_ir << "declare void @putint(i32)\n\n";
     for (auto &function : root->children) {
         module_ir << dfs_func(function, &rootBlock);
     }
