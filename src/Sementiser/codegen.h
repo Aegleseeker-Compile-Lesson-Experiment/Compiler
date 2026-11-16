@@ -21,6 +21,9 @@ public:
     std::string generate(const std::vector<IRFunc>& funcs);
     void gen_func(const IRFunc& fn);
     void gen_inst(const IRInst& inst);
+    void gen_mul(const int& value);
+    void gen_div(const int& value, const bool& divided);
+    void gen_rem(const int& value, const bool& divided);
 };
 
 #endif // !CODEGEN_H
