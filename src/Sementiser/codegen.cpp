@@ -52,10 +52,20 @@ std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
 
 void CodeGen::gen_func(const IRFunc& fn) {
     stack_offset.clear();
-    current_offset = -16;
+    var_reg.clear();
+    used_s_regs.clear();
+    for (const auto& inst : fn.insts) {
+        if (inst.op == IROp::ALLOCA && used_s_regs.size() < 11) {
+            std::string sreg = "s" + std::to_string(used_s_regs.size() + 1);
+            var_reg[inst.dst] = sreg;
+            used_s_regs.push_back(sreg);
+        }
+    }
+    current_offset = -16 - 8 * static_cast<int>(used_s_regs.size());
     epilogue_label = ".Lret_" + fn.name;
     for (const auto& p : fn.params) get_slot(p);
     for (const auto& inst : fn.insts) {
+        if (inst.op == IROp::ALLOCA && var_reg.count(inst.dst)) continue;
         if (!inst.dst.empty() && inst.dst[0] == '%') {
             get_slot(inst.dst);
         }
@@ -79,6 +89,14 @@ void CodeGen::gen_func(const IRFunc& fn) {
         asm_out << "  sd s0, -16(t3)\n";
         asm_out << "  mv s0, t3\n";
     }
+    for (size_t i = 0; i < used_s_regs.size(); ++i) {
+        int off = -24 - static_cast<int>(i) * 8;
+        if (off >= -2048) {
+            asm_out << "  sd " << used_s_regs[i] << ", " << off << "(s0)\n";
+        } else {
+            asm_out << "  li t3, " << off << "\n  add t3, s0, t3\n  sd " << used_s_regs[i] << ", 0(t3)\n";
+        }
+    }
     for (size_t i = 0; i < fn.params.size(); ++i) {
         int slot = get_slot(fn.params[i]);
         if (i < 8) {
@@ -93,6 +111,14 @@ void CodeGen::gen_func(const IRFunc& fn) {
         gen_inst(inst);
     }
     asm_out << epilogue_label << ":\n";
+    for (size_t i = 0; i < used_s_regs.size(); ++i) {
+        int off = -24 - static_cast<int>(i) * 8;
+        if (off >= -2048) {
+            asm_out << "  ld " << used_s_regs[i] << ", " << off << "(s0)\n";
+        } else {
+            asm_out << "  li t3, " << off << "\n  add t3, s0, t3\n  ld " << used_s_regs[i] << ", 0(t3)\n";
+        }
+    }
     asm_out << "  ld ra, -8(s0)\n";
     asm_out << "  ld s0, -16(s0)\n";
     if (frame_size <= 2047) {
@@ -109,13 +135,21 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::ALLOCA:
             break;
         case IROp::LOAD: {
-            emit_lw("t0", get_slot(inst.src1));
-            emit_sw("t0", get_slot(inst.dst));
+            if (var_reg.count(inst.src1)) {
+                emit_sw(var_reg[inst.src1], get_slot(inst.dst));
+            } else {
+                emit_lw("t0", get_slot(inst.src1));
+                emit_sw("t0", get_slot(inst.dst));
+            }
             break;
         }
         case IROp::STORE: {
-            load_operand(inst.src1, "t0");
-            emit_sw("t0", get_slot(inst.src2));
+            if (var_reg.count(inst.src2)) {
+                load_operand(inst.src1, var_reg[inst.src2]);
+            } else {
+                load_operand(inst.src1, "t0");
+                emit_sw("t0", get_slot(inst.src2));
+            }
             break;
         }
         case IROp::ADD:

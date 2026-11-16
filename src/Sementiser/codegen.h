@@ -7,6 +7,8 @@ class CodeGen {
 private:
     std::ostringstream asm_out;
     std::unordered_map<std::string, int> stack_offset;
+    std::unordered_map<std::string, std::string> var_reg;
+    std::vector<std::string> used_s_regs;
     int current_offset = -16;
     int frame_size = 0;
     std::string epilogue_label;

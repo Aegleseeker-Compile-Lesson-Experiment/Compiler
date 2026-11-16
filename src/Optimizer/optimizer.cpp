@@ -11,6 +11,10 @@ bool is_int_literal(const std::string& s) {
 }
 
 void optimize_ir(IRFunc& fn) {
+    /* Const value
+     * Delete unused variables
+     * Delete dead circles
+    */
     std::unordered_map<std::string, std::string> const_map;
     auto resolve = [&](std::string& op) {
         while (const_map.count(op)) op = const_map[op];
