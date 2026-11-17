@@ -228,7 +228,8 @@ void optimize_cg(std::vector<AsmInst>& insts) {
                 }
                 changed = true;
             }
-            if ((inst.op == "sext.w" || inst.op == "mv") && (next_inst.op == "sw" || next_inst.op == "sd") && inst.rd == next_inst.rs2) {
+            if ((inst.op == "sext.w" || inst.op == "mv") && (next_inst.op == "sw" || next_inst.op == "sd") && inst.rd == next_inst.rs2
+                && inst.rd[0] == 't' && inst.rs1[0] == 't') {
                 next_inst = AsmInst {next_inst.op, "", next_inst.rs1, inst.rs1, next_inst.imm, ""};
                 inst = AsmInst {"", "", "", "", 0, ""};
                 changed = true;
@@ -242,7 +243,6 @@ void optimize_cg(std::vector<AsmInst>& insts) {
                 next_inst = AsmInst {"", "", "", "", 0, ""};
                 changed = true;
             }
-            // mv t0, t0
         }
     } while (changed);
 }
