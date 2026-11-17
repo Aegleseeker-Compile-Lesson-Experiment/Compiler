@@ -502,12 +502,15 @@ void CodeGen::gen_div(const int& value, const bool& divided) {
                 plan[cnt++] = {5, 2, M, 0};
                 plan[cnt++] = {6, 3, 1, 2};
                 if (value > 0 && M < 0) {
+                    plan[cnt++] = {4, 3, 3, 32};
                     plan[cnt++] = {0, 3, 3, 1};
+                    if (s > 0) plan[cnt++] = {4, 3, 3, s};
                 } else if (value < 0 && M > 0) {
+                    plan[cnt++] = {4, 3, 3, 32};
                     plan[cnt++] = {1, 3, 3, 1};
-                }
-                if (s > 0) {
-                    plan[cnt++] = {4, 3, 3, s};
+                    if (s > 0) plan[cnt++] = {4, 3, 3, s};
+                } else {
+                    plan[cnt++] = {4, 3, 3, 32 + s};
                 }
                 plan[cnt++] = {3, 2, 3, 31};
                 plan[cnt++] = {0, 3, 3, 2};
@@ -524,15 +527,15 @@ void CodeGen::gen_div(const int& value, const bool& divided) {
         } else if (op == 2) {
             asm_out << "  slli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 3) {
-            asm_out << "  srli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            asm_out << "  srliw " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 4) {
             asm_out << "  srai " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 5) {
             asm_out << "  li " << regs[dst] << ", " << s1 << "\n";
         } else if (op == 6) {
-            asm_out << "  mulh " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
         } else if (op == 7) {
-            asm_out << "  div " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            asm_out << "  divw " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
         }
     }
 }
