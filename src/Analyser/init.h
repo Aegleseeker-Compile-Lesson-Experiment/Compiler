@@ -103,6 +103,15 @@ struct IRFunc {
     std::vector<IRInst> insts;
 };
 
+struct AsmInst {
+    std::string op;
+    std::string rd;
+    std::string rs1;
+    std::string rs2;
+    int imm = 0;
+    std::string label;
+};
+
 namespace Global {
     extern std::ifstream pre_file;
     extern const std::string START;

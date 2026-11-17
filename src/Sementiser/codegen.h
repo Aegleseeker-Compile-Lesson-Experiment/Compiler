@@ -2,18 +2,11 @@
 #define CODEGEN_H
 
 #include "../Analyser/init.h"
+#include "../Optimizer/optimizer.h"
 
 class CodeGen {
 private:
     std::ostringstream asm_out;
-    struct AsmInst {
-        std::string op;
-        std::string rd;
-        std::string rs1;
-        std::string rs2;
-        int imm = 0;
-        std::string label;
-    };
     std::vector<AsmInst> insts;
     std::unordered_map<std::string, int> stack_offset;
     std::unordered_map<std::string, std::string> var_reg;

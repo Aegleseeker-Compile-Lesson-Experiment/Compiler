@@ -196,3 +196,53 @@ void optimize_ir(IRFunc& fn) {
         }
     }
 }
+
+void optimize_cg(std::vector<AsmInst>& insts) {
+    /* 
+     * 
+     * 
+    */
+   auto get_next = [&](size_t index) {
+        for (size_t i = index + 1; i < insts.size(); ++i) {
+            if (insts[i].op != "") {
+                return i;
+            }
+        }
+        return (size_t)0;
+   };
+    bool changed;
+    do {
+        changed = false;
+        for (size_t i = 0; i < insts.size(); ++i) {
+            auto& inst = insts[i];
+            if (insts[i].op == "") continue;
+            auto next_index = get_next(i);
+            if (next_index == 0) continue;
+            auto& next_inst = insts[next_index];
+            if (((inst.op == "sw" && next_inst.op == "lw") || (inst.op == "sd" && next_inst.op == "ld")) &&
+                inst.imm == next_inst.imm && inst.rs1 == next_inst.rs1) {
+                if (inst.rs2 == next_inst.rd) {
+                    next_inst = AsmInst {"", "", "", "", 0, ""};
+                } else {
+                    next_inst = AsmInst{ "sext.w", next_inst.rd, inst.rs2, "", 0, "" };
+                }
+                changed = true;
+            }
+            if ((inst.op == "sext.w" || inst.op == "mv") && (next_inst.op == "sw" || next_inst.op == "sd") && inst.rd == next_inst.rs2) {
+                next_inst = AsmInst {next_inst.op, "", next_inst.rs1, inst.rs1, next_inst.imm, ""};
+                inst = AsmInst {"", "", "", "", 0, ""};
+                changed = true;
+            }
+            if (inst.op == "j" && inst.label == next_inst.label) {
+                inst = AsmInst {"", "", "", "", 0, ""};
+                changed = true;
+            }
+            if ((inst.op == "sext.w" || inst.op == "mv") && inst.op == next_inst.op &&
+                inst.rd == next_inst.rd && inst.rs1 == next_inst.rs1 && inst.rs2 == next_inst.rs2) {
+                next_inst = AsmInst {"", "", "", "", 0, ""};
+                changed = true;
+            }
+            // mv t0, t0
+        }
+    } while (changed);
+}

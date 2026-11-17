@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
         int res = A.lalr1_analyse();
         if (res == -1) {
             Sementiser S;
-            auto msg = S.check_error(true);
+            auto msg = S.check_error(false);
             if (msg.empty()) {
                 puts("accept");
             } else {

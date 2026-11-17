@@ -55,6 +55,7 @@ std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
     for (const auto& fn : funcs) {
         gen_func(fn);
     }
+    optimize_cg(insts);
     serialize_asm();
     return asm_out.str();
 }
@@ -92,7 +93,9 @@ void CodeGen::serialize_asm() {
         "beq", "bne", "blt", "bge", "bltu", "bgeu"
     };
     for (const auto& i : insts) {
-        if (i.op == "globl") {
+        if (i.op == "") {
+            continue;
+        } else if (i.op == "globl") {
             asm_out << "  .globl " << i.label << "\n" << "  .type " << i.label << ", @function\n";
         } else if (i.op == "label") {
             asm_out << i.label << ":\n";
