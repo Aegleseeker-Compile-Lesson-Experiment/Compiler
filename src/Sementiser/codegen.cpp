@@ -624,19 +624,20 @@ void CodeGen::gen_rem(const int& value, const bool& divided) {
         } else if (op == 2) {
             asm_out << "  slli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 3) {
-            asm_out << "  srli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            asm_out << "  srliw " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 4) {
             asm_out << "  srai " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 5) {
             asm_out << "  li " << regs[dst] << ", " << s1 << "\n";
         } else if (op == 6) {
-            asm_out << "  mulh " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            asm_out << "  srai " << regs[dst] << ", " << regs[dst] << ", 32\n";
         } else if (op == 7) {
             asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
         } else if (op == 8) {
             asm_out << "  andi " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
         } else if (op == 9) {
-            asm_out << "  rem " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            asm_out << "  remw " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
         }
     }
 }
