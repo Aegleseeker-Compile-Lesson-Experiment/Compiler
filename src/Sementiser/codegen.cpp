@@ -24,7 +24,7 @@ void CodeGen::emit_sw(const std::string& rs, int offset, const std::string& base
     } else {
         insts.push_back(AsmInst{ "li", "t3", "", "", offset, "" });
         insts.push_back(AsmInst{ "add", "t3", base, "t3", 0, "" });
-        insts.push_back(AsmInst{ "lw", rs, "t3", "", 0, "" });
+        insts.push_back(AsmInst{ "sw", "", "t3", rs, 0, "" });
     }
 }
 
