@@ -10,29 +10,37 @@ int CodeGen::get_slot(const std::string& name) {
 
 void CodeGen::emit_lw(const std::string& rd, int offset, const std::string& base) {
     if (offset >= -2048 && offset <= 2047) {
-        asm_out << "  lw " << rd << ", " << offset << "(" << base << ")\n";
+        insts.push_back(AsmInst{ "lw", rd, base, "", offset, "" });
     } else {
-        asm_out << "  li t3, " << offset << "\n";
-        asm_out << "  add t3, " << base << ", t3\n";
-        asm_out << "  lw " << rd << ", 0(t3)\n";
+        insts.push_back(AsmInst{ "li", "t3", "", "", offset, "" });
+        insts.push_back(AsmInst{ "add", "t3", base, "t3", 0, "" });
+        insts.push_back(AsmInst{ "lw", rd, "t3", "", 0, "" });
     }
 }
 
 void CodeGen::emit_sw(const std::string& rs, int offset, const std::string& base) {
     if (offset >= -2048 && offset <= 2047) {
-        asm_out << "  sw " << rs << ", " << offset << "(" << base << ")\n";
+        insts.push_back(AsmInst{ "sw", "", base, rs, offset, "" });
     } else {
-        asm_out << "  li t3, " << offset << "\n";
-        asm_out << "  add t3, " << base << ", t3\n";
-        asm_out << "  sw " << rs << ", 0(t3)\n";
+        insts.push_back(AsmInst{ "li", "t3", "", "", offset, "" });
+        insts.push_back(AsmInst{ "add", "t3", base, "t3", 0, "" });
+        insts.push_back(AsmInst{ "lw", rs, "t3", "", 0, "" });
     }
+}
+
+void CodeGen::emit_branch(const std::string& op, const std::string& rs1, const std::string& rs2, const std::string& label) {
+    insts.push_back(AsmInst{ op, "", rs1, rs2, 0, "." + label });
+}
+
+void CodeGen::emit_jmp(const std::string& label) {
+    insts.push_back(AsmInst{ "j", "", "", "", 0, "." + label });
 }
 
 void CodeGen::load_operand(const std::string& op, const std::string& reg) {
     if (op[0] == '%') {
         emit_lw(reg, get_slot(op));
     } else {
-        asm_out << "  li " << reg << ", " << op << "\n";
+        insts.push_back(AsmInst{ "li", reg, "", "", std::stoi(op), "" });
     }
 }
 
@@ -47,7 +55,73 @@ std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
     for (const auto& fn : funcs) {
         gen_func(fn);
     }
+    serialize_asm();
     return asm_out.str();
+}
+
+void CodeGen::serialize_asm() {
+    static const std::unordered_set<std::string> r_type = {
+        "add", "addw", "sub", "subw",
+        "mul", "mulw", "mulh", "mulhu", "mulhsu",
+        "div", "divw", "divu", "divuw",
+        "rem", "remw", "remu", "remuw",
+        "and", "or", "xor",
+        "sll", "sllw", "srl", "srlw", "sra", "sraw",
+        "slt", "sltu"
+    };
+    static const std::unordered_set<std::string> i_type = {
+        "addi", "addiw",
+        "andi", "ori", "xori",
+        "slli", "slliw", "srli", "srliw", "srai", "sraiw",
+        "slti", "sltiu"
+    };
+    static const std::unordered_set<std::string> loads = {
+        "lb", "lbu", "lh", "lhu", "lw", "lwu", "ld"
+    };
+    static const std::unordered_set<std::string> stores = {
+        "sb", "sh", "sw", "sd"
+    };
+    static const std::unordered_set<std::string> unary_ops = {
+        "mv", "sext.w", "neg", "negw", "not",
+        "seqz", "snez", "sltz", "sgtz"
+    };
+    static const std::unordered_set<std::string> branch_1op = {
+        "beqz", "bnez", "bltz", "bgez", "blez", "bgtz"
+    };
+    static const std::unordered_set<std::string> branch_2op = {
+        "beq", "bne", "blt", "bge", "bltu", "bgeu"
+    };
+    for (const auto& i : insts) {
+        if (i.op == "globl") {
+            asm_out << "  .globl " << i.label << "\n" << "  .type " << i.label << ", @function\n";
+        } else if (i.op == "label") {
+            asm_out << i.label << ":\n";
+        } else if (i.op == "raw") {
+            asm_out << "  " << i.label << "\n";
+        } else if (i.op == "ret" || i.op == "nop" || i.op == "ecall") {
+            asm_out << "  " << i.op << "\n";
+        } else if (i.op == "j" || i.op == "call") {
+            asm_out << "  " << i.op << " " << i.label << "\n";
+        } else if (i.op == "li") {
+            asm_out << "  li " << i.rd << ", " << i.imm << "\n";
+        } else if (i.op == "la") {
+            asm_out << "  la " << i.rd << ", " << i.label << "\n";
+        } else if (r_type.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << ", " << i.rs2 << "\n";
+        } else if (i_type.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << ", " << i.imm << "\n";
+        } else if (loads.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.imm << "(" << i.rs1 << ")\n";
+        } else if (stores.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs2 << ", " << i.imm << "(" << i.rs1 << ")\n";
+        } else if (unary_ops.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << "\n";
+        } else if (branch_1op.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs1 << ", " << i.label << "\n";
+        } else if (branch_2op.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs1 << ", " << i.rs2 << ", " << i.label << "\n";
+        }
+    }
 }
 
 void CodeGen::gen_func(const IRFunc& fn) {
@@ -62,7 +136,7 @@ void CodeGen::gen_func(const IRFunc& fn) {
         }
     }
     current_offset = -16 - 8 * static_cast<int>(used_s_regs.size());
-    epilogue_label = ".Lret_" + fn.name;
+    epilogue_label = "Lret_" + fn.name;
     for (const auto& p : fn.params) get_slot(p);
     for (const auto& inst : fn.insts) {
         if (inst.op == IROp::ALLOCA && var_reg.count(inst.dst)) continue;
@@ -72,29 +146,30 @@ void CodeGen::gen_func(const IRFunc& fn) {
     }
     int raw_size = -current_offset;
     frame_size = (raw_size + 15) & ~15;
-    asm_out << "  .globl " << fn.name << "\n";
-    asm_out << "  .type " << fn.name << ", @function\n";
-    asm_out << fn.name << ":\n";
+    insts.push_back(AsmInst{ "globl", "", "", "", 0, fn.name });
+    insts.push_back(AsmInst{ "label", "", "", "", 0, fn.name });
     if (frame_size <= 2048) {
-        asm_out << "  addi sp, sp, -" << frame_size << "\n";
-        asm_out << "  sd ra, " << (frame_size - 8) << "(sp)\n";
-        asm_out << "  sd s0, " << (frame_size - 16) << "(sp)\n";
-        asm_out << "  addi s0, sp, " << frame_size << "\n";
+        insts.push_back(AsmInst{ "addi", "sp", "sp", "", -frame_size, "" });
+        insts.push_back(AsmInst{ "sd", "", "sp", "ra", frame_size - 8, "" });
+        insts.push_back(AsmInst{ "sd", "", "sp", "s0", frame_size - 16, "" });
+        insts.push_back(AsmInst{ "addi", "s0", "sp", "", frame_size, "" });
     } else {
-        asm_out << "  li t3, -" << frame_size << "\n";
-        asm_out << "  add sp, sp, t3\n";
-        asm_out << "  li t3, " << frame_size << "\n";
-        asm_out << "  add t3, sp, t3\n";
-        asm_out << "  sd ra, -8(t3)\n";
-        asm_out << "  sd s0, -16(t3)\n";
-        asm_out << "  mv s0, t3\n";
+        insts.push_back(AsmInst{ "li", "t3", "", "", -frame_size, "" });
+        insts.push_back(AsmInst{ "add", "sp", "sp", "t3", 0, "" });
+        insts.push_back(AsmInst{ "li", "t3", "", "", frame_size, "" });
+        insts.push_back(AsmInst{ "add", "t3", "sp", "t3", 0, "" });
+        insts.push_back(AsmInst{ "sd", "", "t3", "ra", -8, "" });
+        insts.push_back(AsmInst{ "sd", "", "t3", "s0", -16, "" });
+        insts.push_back(AsmInst{ "mv", "s0", "t3", "", 0, "" });
     }
     for (size_t i = 0; i < used_s_regs.size(); ++i) {
         int off = -24 - static_cast<int>(i) * 8;
         if (off >= -2048) {
-            asm_out << "  sd " << used_s_regs[i] << ", " << off << "(s0)\n";
+            insts.push_back(AsmInst{ "sd", "", "s0", used_s_regs[i], off, "" });
         } else {
-            asm_out << "  li t3, " << off << "\n  add t3, s0, t3\n  sd " << used_s_regs[i] << ", 0(t3)\n";
+            insts.push_back(AsmInst{ "li", "t3", "", "", off, "" });
+            insts.push_back(AsmInst{ "add", "t3", "s0", "t3", 0, "" });
+            insts.push_back(AsmInst{ "sd", "", "t3", used_s_regs[i], 0, "" });
         }
     }
     for (size_t i = 0; i < fn.params.size(); ++i) {
@@ -107,27 +182,58 @@ void CodeGen::gen_func(const IRFunc& fn) {
             emit_sw("t0", slot);
         }
     }
+    std::unordered_map<std::string, int> reg_uses;
     for (const auto& inst : fn.insts) {
+        if (!inst.src1.empty() && inst.src1[0] == '%') reg_uses[inst.src1]++;
+        if (!inst.src2.empty() && inst.src2[0] == '%') reg_uses[inst.src2]++;
+        for (const auto& a : inst.args) if (!a.empty() && a[0] == '%') reg_uses[a]++;
+    }
+    for (size_t i = 0; i < fn.insts.size(); ++i) {
+        const auto& inst = fn.insts[i];
+        if (i + 1 < fn.insts.size() && (inst.op == IROp::ICMP_EQ || inst.op == IROp::ICMP_NE || 
+            inst.op == IROp::ICMP_SGE || inst.op == IROp::ICMP_SGT || inst.op == IROp::ICMP_SLE ||
+            inst.op == IROp::ICMP_SLT) && fn.insts[i + 1].op == IROp::BR_COND &&
+            fn.insts[i + 1].src1 == inst.dst && reg_uses[inst.dst] == 1) {
+            const auto& br = fn.insts[i + 1];
+            load_operand(inst.src1, "t0");
+            load_operand(inst.src2, "t1");
+            auto L_true = br.dst;
+            auto L_false = br.src2;
+            switch (inst.op) {
+                case IROp::ICMP_EQ: emit_branch("beq", "t0", "t1", L_true); break;
+                case IROp::ICMP_NE: emit_branch("bne", "t0", "t1", L_true); break;
+                case IROp::ICMP_SLT: emit_branch("blt", "t0", "t1", L_true); break;
+                case IROp::ICMP_SGE: emit_branch("bge", "t0", "t1", L_true); break;
+                case IROp::ICMP_SGT: emit_branch("blt", "t1", "t0", L_true); break;
+                case IROp::ICMP_SLE: emit_branch("bge", "t1", "t0", L_true); break;
+                default: break;
+            }
+            emit_jmp(L_false);
+            ++i;
+            continue;
+        }
         gen_inst(inst);
     }
-    asm_out << epilogue_label << ":\n";
+    insts.push_back(AsmInst{ "label", "", "", "", 0, "." + epilogue_label });
     for (size_t i = 0; i < used_s_regs.size(); ++i) {
         int off = -24 - static_cast<int>(i) * 8;
         if (off >= -2048) {
-            asm_out << "  ld " << used_s_regs[i] << ", " << off << "(s0)\n";
+            insts.push_back(AsmInst{ "ld", used_s_regs[i], "s0", "", off, "" });
         } else {
-            asm_out << "  li t3, " << off << "\n  add t3, s0, t3\n  ld " << used_s_regs[i] << ", 0(t3)\n";
+            insts.push_back(AsmInst{ "li", "t3", "", "", off, "" });
+            insts.push_back(AsmInst{ "add", "t3", "s0", "t3", 0, "" });
+            insts.push_back(AsmInst{ "ld", used_s_regs[i], "", "t3", 0, "" });
         }
     }
-    asm_out << "  ld ra, -8(s0)\n";
-    asm_out << "  ld s0, -16(s0)\n";
+    insts.push_back(AsmInst{ "ld", "ra", "s0", "", -8, "" });
+    insts.push_back(AsmInst{ "ld", "s0", "s0", "", -16, "" });
     if (frame_size <= 2047) {
-        asm_out << "  addi sp, sp, " << frame_size << "\n";
+        insts.push_back(AsmInst{ "addi", "sp", "sp", "", frame_size, "" });
     } else {
-        asm_out << "  li t3, " << frame_size << "\n";
-        asm_out << "  add sp, sp, t3\n";
+        insts.push_back(AsmInst{ "li", "t3", "", "", frame_size, "" });
+        insts.push_back(AsmInst{ "add", "sp", "sp", "t3", 0, "" });
     }
-    asm_out << "  ret\n\n";
+    insts.push_back(AsmInst{ "ret", "", "", "", 0, "" });
 }
 
 void CodeGen::gen_inst(const IRInst& inst) {
@@ -155,15 +261,15 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::ADD: {
             if (inst.src1[0] != '%') {
                 if (inst.src2[0] != '%') {
-                    asm_out << "  li t2, " << std::stoi(inst.src1) + std::stoi(inst.src2) << "\n";
+                    insts.push_back(AsmInst{ "li", "t2", "", "", std::stoi(inst.src1) + std::stoi(inst.src2), "" });
                 } else {
                     load_operand(inst.src2, "t1");
                     auto value = std::stoi(inst.src1);
                     if (value < -2048 || value > 2047) {
                         load_operand(inst.src1, "t0");
-                        asm_out << "  add t2, t0, t1\n";
+                        insts.push_back(AsmInst{ "add", "t2", "t0", "t1", 0, "" });
                     } else {
-                        asm_out << "  addi t2, " << "t1, " << value << "\n";
+                        insts.push_back(AsmInst{ "addi", "t2", "t1", "", value, "" });
                     }
                 }
             } else {
@@ -172,14 +278,14 @@ void CodeGen::gen_inst(const IRInst& inst) {
                     auto value = std::stoi(inst.src2);
                     if (value < -2048 || value > 2047) {
                         load_operand(inst.src2, "t1");
-                        asm_out << "  add t2, t0, t1\n";
+                        insts.push_back(AsmInst{ "add", "t2", "t0", "t1", 0, "" });
                     } else {
-                        asm_out << "  addi t2, " << "t0, " << value << "\n";
+                        insts.push_back(AsmInst{ "addi", "t2", "t0", "", value, "" });
                     }
                 } else {
                     load_operand(inst.src1, "t0");
                     load_operand(inst.src2, "t1");
-                    asm_out << "  add t2, t0, t1\n";
+                    insts.push_back(AsmInst{ "add", "t2", "t0", "t1", 0, "" });
                 }
             }
             emit_sw("t2", get_slot(inst.dst));
@@ -188,16 +294,16 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::SUB: {
             if (inst.src1[0] != '%') {
                 if (inst.src2[0] != '%') {
-                    asm_out << "  li t2, " << std::stoi(inst.src1) - std::stoi(inst.src2) << "\n";
+                    insts.push_back(AsmInst{ "li", "t2", "", "", std::stoi(inst.src1) - std::stoi(inst.src2), "" });
                 } else {
                     load_operand(inst.src2, "t1");
                     auto value = std::stoi(inst.src1);
                     if (-value < -2048 || -value > 2047) {
                         load_operand(inst.src2, "t1");
-                        asm_out << "  sub t2, t0, t1\n";
+                        insts.push_back(AsmInst{ "sub", "t2", "t0", "t1", 0, "" });
                     } else {
-                        asm_out << "  addi t2, " << "t1, " << -value << "\n";
-                        asm_out << "  sub t2, x0, t2\n";
+                        insts.push_back(AsmInst{ "addi", "t2", "t1", "", -value, "" });
+                        insts.push_back(AsmInst{ "sub", "t2", "x0", "t2", 0, "" });
                     }
                 }
             } else {
@@ -206,14 +312,14 @@ void CodeGen::gen_inst(const IRInst& inst) {
                     auto value = std::stoi(inst.src2);
                     if (-value < -2048 || -value > 2047) {
                         load_operand(inst.src2, "t1");
-                        asm_out << "  sub t2, t0, t1\n";
+                        insts.push_back(AsmInst{ "sub", "t2", "t0", "t1", 0, "" });
                     } else {
-                        asm_out << "  addi t2, " << "t0, " << -value << "\n";
+                        insts.push_back(AsmInst{ "addi", "t2", "t0", "", -value, "" });
                     }
                 } else {
                     load_operand(inst.src1, "t0");
                     load_operand(inst.src2, "t1");
-                    asm_out << "  sub t2, t0, t1\n";
+                    insts.push_back(AsmInst{ "sub", "t2", "t0", "t1", 0, "" });
                 }
             }
             emit_sw("t2", get_slot(inst.dst));
@@ -222,7 +328,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::MUL: {
             if (inst.src1[0] != '%') {
                 if (inst.src2[0] != '%') {
-                    asm_out << "  li t2, " << std::stoi(inst.src1) * std::stoi(inst.src2) << "\n";
+                    insts.push_back(AsmInst{ "li", "t2", "", "", std::stoi(inst.src1) * std::stoi(inst.src2), "" });
                 } else {
                     load_operand(inst.src2, "t0");
                     auto value = std::stoi(inst.src1);
@@ -236,7 +342,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
                 } else {
                     load_operand(inst.src1, "t0");
                     load_operand(inst.src2, "t1");
-                    asm_out << "  mul t2, t0, t1\n";
+                    insts.push_back(AsmInst{ "mul", "t2", "t0", "t1", 0, "" });
                 }
             }
             emit_sw("t2", get_slot(inst.dst));
@@ -245,7 +351,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::SDIV: {
             if (inst.src1[0] != '%') {
                 if (inst.src2[0] != '%') {
-                    asm_out << "  li t2, " << std::stoi(inst.src1) / std::stoi(inst.src2) << "\n";
+                    insts.push_back(AsmInst{ "li", "t2", "", "", std::stoi(inst.src1) / std::stoi(inst.src2), "" });
                 } else {
                     load_operand(inst.src2, "t1");
                     auto value = std::stoi(inst.src1);
@@ -259,7 +365,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
                 } else {
                     load_operand(inst.src1, "t0");
                     load_operand(inst.src2, "t1");
-                    asm_out << "  div t2, t0, t1\n";
+                    insts.push_back(AsmInst{ "div", "t2", "t0", "t1", 0, "" });
                 }
             }
             emit_sw("t2", get_slot(inst.dst));
@@ -268,7 +374,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
         case IROp::SREM: {
             if (inst.src1[0] != '%') {
                 if (inst.src2[0] != '%') {
-                    asm_out << "  li t2, " << std::stoi(inst.src1) % std::stoi(inst.src2) << "\n";
+                    insts.push_back(AsmInst{ "li", "t2", "", "", std::stoi(inst.src1) % std::stoi(inst.src2), "" });
                 } else {
                     load_operand(inst.src2, "t1");
                     auto value = std::stoi(inst.src1);
@@ -282,7 +388,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
                 } else {
                     load_operand(inst.src1, "t0");
                     load_operand(inst.src2, "t1");
-                    asm_out << "  rem t2, t0, t1\n";
+                    insts.push_back(AsmInst{ "rem", "t2", "t0", "t1", 0, "" });
                 }
             }
             emit_sw("t2", get_slot(inst.dst));
@@ -297,41 +403,41 @@ void CodeGen::gen_inst(const IRInst& inst) {
             load_operand(inst.src1, "t0");
             load_operand(inst.src2, "t1");
             if (inst.op == IROp::ICMP_EQ) {
-                asm_out << "  xor t2, t0, t1\n";
-                asm_out << "  seqz t2, t2\n";
+                insts.push_back(AsmInst{ "xor", "t2", "t0", "t1", 0, "" });
+                insts.push_back(AsmInst{ "seqz", "t2", "t2", "", 0, "" });
             } else if (inst.op == IROp::ICMP_NE) {
-                asm_out << "  xor t2, t0, t1\n";
-                asm_out << "  snez t2, t2\n";
+                insts.push_back(AsmInst{ "xor", "t2", "t0", "t1", 0, "" });
+                insts.push_back(AsmInst{ "snez", "t2", "t2", "", 0, "" });
             } else if (inst.op == IROp::ICMP_SLT) {
-                asm_out << "  slt t2, t0, t1\n";
+                insts.push_back(AsmInst{ "slt", "t2", "t0", "t1", 0, "" });
             } else if (inst.op == IROp::ICMP_SGT) {
-                asm_out << "  slt t2, t1, t0\n";
+                insts.push_back(AsmInst{ "slt", "t2", "t1", "t0", 0, "" });
             } else if (inst.op == IROp::ICMP_SLE) {
-                asm_out << "  slt t2, t1, t0\n";
-                asm_out << "  xori t2, t2, 1\n";
+                insts.push_back(AsmInst{ "slt", "t2", "t1", "t0", 0, "" });
+                insts.push_back(AsmInst{ "xori", "t2", "t2", "", 1, "" });
             } else if (inst.op == IROp::ICMP_SGE) {
-                asm_out << "  slt t2, t0, t1\n";
-                asm_out << "  xori t2, t2, 1\n";
+                insts.push_back(AsmInst{ "slt", "t2", "t0", "t1", 0, "" });
+                insts.push_back(AsmInst{ "xori", "t2", "t2", "", 1, "" });
             }
             emit_sw("t2", get_slot(inst.dst));
             break;
         }
         case IROp::LABEL:
-            asm_out << "." << inst.dst << ":\n";
+            insts.push_back(AsmInst{ "label", "", "", "", 0, "." + inst.dst });
             break;
         case IROp::JMP:
-            asm_out << "  j ." << inst.dst << "\n";
+            emit_jmp(inst.dst);
             break;
         case IROp::BR_COND:
             load_operand(inst.src1, "t0");
-            asm_out << "  bnez t0, ." << inst.dst << "\n";
-            asm_out << "  j ." << inst.src2 << "\n";
+            insts.push_back(AsmInst{ "bnez", "", "t0", "", 0, "." + inst.dst });
+            emit_jmp(inst.src2);
             break;
         case IROp::CALL: {
             int extra_args = std::max(0, static_cast<int>(inst.args.size()) - 8);
             int arg_stack_bytes = ((extra_args * 4) + 15) & ~15;
             if (arg_stack_bytes > 0) {
-                asm_out << "  addi sp, sp, -" << arg_stack_bytes << "\n";
+                insts.push_back(AsmInst{ "addi", "sp", "sp", "", -arg_stack_bytes, "" });
                 for (int i = 8; i < static_cast<int>(inst.args.size()); ++i) {
                     load_operand(inst.args[i], "t0");
                     emit_sw("t0", (i - 8) * 4, "sp");
@@ -340,9 +446,9 @@ void CodeGen::gen_inst(const IRInst& inst) {
             for (int i = 0; i < std::min(8, static_cast<int>(inst.args.size())); ++i) {
                 load_operand(inst.args[i], "a" + std::to_string(i));
             }
-            asm_out << "  call " << inst.src1 << "\n";
+            insts.push_back(AsmInst{ "call", "", "", "", 0, inst.src1 });
             if (arg_stack_bytes > 0) {
-                asm_out << "  addi sp, sp, " << arg_stack_bytes << "\n";
+                insts.push_back(AsmInst{ "addi", "sp", "sp", "", arg_stack_bytes, "" });
             }
             if (!inst.dst.empty()) {
                 emit_sw("a0", get_slot(inst.dst));
@@ -353,7 +459,7 @@ void CodeGen::gen_inst(const IRInst& inst) {
             if (!inst.src1.empty()) {
                 load_operand(inst.src1, "a0");
             }
-            asm_out << "  j " << epilogue_label << "\n";
+            emit_jmp(epilogue_label);
             break;
     }
 }
@@ -426,16 +532,16 @@ void CodeGen::gen_mul(const int& value) {
         for (int i = 0; i < step_cnt; ++i) {
             auto [op, dst, s1, s2] = plan[i];
             if (op == 0) {
-                asm_out << "  add " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+                insts.push_back(AsmInst{ "add", regs[dst], regs[s1], regs[s2], 0, "" });
             } else if (op == 1) {
-                asm_out << "  sub " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+                insts.push_back(AsmInst{ "sub", regs[dst], regs[s1], regs[s2], 0, "" });
             } else if (op == 2) {
-                asm_out << "  slli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+                insts.push_back(AsmInst{ "slli", regs[dst], regs[s1], "", s2, "" });
             }
         }
     } else {
-        asm_out << "  li t1, " << value << "\n";
-        asm_out << "  mul t2, t0, t1\n";
+        insts.push_back(AsmInst{ "li", "t1", "", "", value, "" });
+        insts.push_back(AsmInst{ "mul", "t2", "t0", "t1", 0, "" });
     }
 }
 
@@ -521,21 +627,21 @@ void CodeGen::gen_div(const int& value, const bool& divided) {
     for (int i = 0; i < cnt; ++i) {
         auto [op, dst, s1, s2] = plan[i];
         if (op == 0) {
-            asm_out << "  add " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "add", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 1) {
-            asm_out << "  sub " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "sub", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 2) {
-            asm_out << "  slli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "slli", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 3) {
-            asm_out << "  srliw " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "srliw", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 4) {
-            asm_out << "  srai " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "srai", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 5) {
-            asm_out << "  li " << regs[dst] << ", " << s1 << "\n";
+            insts.push_back(AsmInst{ "li", regs[dst], "", "", s1, "" });
         } else if (op == 6) {
-            asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "mul", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 7) {
-            asm_out << "  divw " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "divw", regs[dst], regs[s1], regs[s2], 0, "" });
         }
     }
 }
@@ -621,26 +727,26 @@ void CodeGen::gen_rem(const int& value, const bool& divided) {
     for (int i = 0; i < cnt; ++i) {
         auto [op, dst, s1, s2] = plan[i];
         if (op == 0) {
-            asm_out << "  add " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "add", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 1) {
-            asm_out << "  sub " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "sub", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 2) {
-            asm_out << "  slli " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "slli", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 3) {
-            asm_out << "  srliw " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "srliw", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 4) {
-            asm_out << "  srai " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "srai", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 5) {
-            asm_out << "  li " << regs[dst] << ", " << s1 << "\n";
+            insts.push_back(AsmInst{ "li", regs[dst], "", "", s1, "" });
         } else if (op == 6) {
-            asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
-            asm_out << "  srai " << regs[dst] << ", " << regs[dst] << ", 32\n";
+            insts.push_back(AsmInst{ "mul", regs[dst], regs[s1], regs[s2], 0, "" });
+            insts.push_back(AsmInst{ "srai", regs[dst], regs[dst], "", 32, "" });
         } else if (op == 7) {
-            asm_out << "  mul " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "mul", regs[dst], regs[s1], regs[s2], 0, "" });
         } else if (op == 8) {
-            asm_out << "  andi " << regs[dst] << ", " << regs[s1] << ", " << s2 << "\n";
+            insts.push_back(AsmInst{ "andi", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 9) {
-            asm_out << "  remw " << regs[dst] << ", " << regs[s1] << ", " << regs[s2] << "\n";
+            insts.push_back(AsmInst{ "remw", regs[dst], regs[s1], regs[s2], 0, "" });
         }
     }
 }
