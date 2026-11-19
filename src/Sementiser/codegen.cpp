@@ -12,9 +12,9 @@ void CodeGen::emit_lw(const std::string& rd, int offset, const std::string& base
     if (offset >= -2048 && offset <= 2047) {
         insts.push_back(AsmInst{ "lw", rd, base, "", offset, "" });
     } else {
-        insts.push_back(AsmInst{ "li", "t3", "", "", offset, "" });
-        insts.push_back(AsmInst{ "add", "t3", base, "t3", 0, "" });
-        insts.push_back(AsmInst{ "lw", rd, "t3", "", 0, "" });
+        insts.push_back(AsmInst{ "li", "t5", "", "", offset, "" });
+        insts.push_back(AsmInst{ "add", "t5", base, "t5", 0, "" });
+        insts.push_back(AsmInst{ "lw", rd, "t5", "", 0, "" });
     }
 }
 
@@ -22,9 +22,9 @@ void CodeGen::emit_sw(const std::string& rs, int offset, const std::string& base
     if (offset >= -2048 && offset <= 2047) {
         insts.push_back(AsmInst{ "sw", "", base, rs, offset, "" });
     } else {
-        insts.push_back(AsmInst{ "li", "t3", "", "", offset, "" });
-        insts.push_back(AsmInst{ "add", "t3", base, "t3", 0, "" });
-        insts.push_back(AsmInst{ "sw", "", "t3", rs, 0, "" });
+        insts.push_back(AsmInst{ "li", "t5", "", "", offset, "" });
+        insts.push_back(AsmInst{ "add", "t5", base, "t5", 0, "" });
+        insts.push_back(AsmInst{ "sw", "", "t5", rs, 0, "" });
     }
 }
 
@@ -44,7 +44,7 @@ void CodeGen::load_operand(const std::string& op, const std::string& reg) {
     }
 }
 
-std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
+std::string CodeGen::generate(/* const std::vector<IRFunc>& funcs */) {
     asm_out.str("");
     asm_out << "  .text\n";
     asm_out << "  .globl _start\n";
@@ -52,10 +52,11 @@ std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
     asm_out << "  call main\n";
     asm_out << "  li a7, 93\n";
     asm_out << "  ecall\n";
-    for (const auto& fn : funcs) {
-        gen_func(fn);
-    }
-    optimize_cg(insts);
+    // for (const auto& fn : funcs) {
+    //     gen_func(fn);
+    // }
+    // optimize_cg(insts);
+    optimize_cg(debug_insts);
     serialize_asm();
     return asm_out.str();
 }
@@ -93,6 +94,40 @@ void CodeGen::serialize_asm() {
         "beq", "bne", "blt", "bge", "bltu", "bgeu"
     };
     for (const auto& i : insts) {
+        if (i.op == "") {
+            continue;
+        } else if (i.op == "globl") {
+            asm_out << "  .globl " << i.label << "\n" << "  .type " << i.label << ", @function\n";
+        } else if (i.op == "label") {
+            asm_out << i.label << ":\n";
+        } else if (i.op == "raw") {
+            asm_out << "  " << i.label << "\n";
+        } else if (i.op == "ret" || i.op == "nop" || i.op == "ecall") {
+            asm_out << "  " << i.op << "\n";
+        } else if (i.op == "j" || i.op == "call") {
+            asm_out << "  " << i.op << " " << i.label << "\n";
+        } else if (i.op == "li") {
+            asm_out << "  li " << i.rd << ", " << i.imm << "\n";
+        } else if (i.op == "la") {
+            asm_out << "  la " << i.rd << ", " << i.label << "\n";
+        } else if (r_type.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << ", " << i.rs2 << "\n";
+        } else if (i_type.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << ", " << i.imm << "\n";
+        } else if (loads.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.imm << "(" << i.rs1 << ")\n";
+        } else if (stores.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs2 << ", " << i.imm << "(" << i.rs1 << ")\n";
+        } else if (unary_ops.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rd << ", " << i.rs1 << "\n";
+        } else if (branch_1op.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs1 << ", " << i.label << "\n";
+        } else if (branch_2op.count(i.op)) {
+            asm_out << "  " << i.op << " " << i.rs1 << ", " << i.rs2 << ", " << i.label << "\n";
+        }
+    }
+    asm_out << "\n";
+    for (const auto& i : debug_insts) {
         if (i.op == "") {
             continue;
         } else if (i.op == "globl") {
@@ -464,6 +499,13 @@ void CodeGen::gen_inst(const IRInst& inst) {
             }
             emit_jmp(epilogue_label);
             break;
+        case IROp::MOV:
+            load_operand(inst.src1, "t0");
+            emit_sw("t0", get_slot(inst.dst));
+            break;
+        default:
+            exit(0);
+            break;
     }
 }
 
@@ -750,6 +792,439 @@ void CodeGen::gen_rem(const int& value, const bool& divided) {
             insts.push_back(AsmInst{ "andi", regs[dst], regs[s1], "", s2, "" });
         } else if (op == 9) {
             insts.push_back(AsmInst{ "remw", regs[dst], regs[s1], regs[s2], 0, "" });
+        }
+    }
+}
+
+RegAllocResult CodeGen::linear_scan_allocate(std::vector<LiveInterval>& intervals) {
+    RegAllocResult res;
+    std::sort(intervals.begin(), intervals.end(), [](const LiveInterval& a, const LiveInterval& b) {
+        if (a.start != b.start) return a.start < b.start;
+        return a.end < b.end;
+    });
+    std::vector<std::string> free_caller = {
+        "a7", "a6", "a5", "a4", "a3", "a2", "a1", "a0", "t4", "t3", "t2", "t1", "t0"
+    };
+    std::vector<std::string> free_callee = {
+        "s11", "s10", "s9", "s8", "s7", "s6", "s5", "s4", "s3", "s2", "s1"
+    };
+    std::unordered_set<std::string> recorded_callee;
+    auto alloc_from = [](std::vector<std::string>& pool) -> std::string {
+        std::string r = pool.back();
+        pool.pop_back();
+        return r;
+    };
+    auto release_reg = [&](const std::string& r) {
+        if (r[0] == 's') free_callee.push_back(r);
+        else free_caller.push_back(r);
+    };
+    auto assign_phys = [&](LiveInterval& iv, const std::string& r) {
+        iv.phys_reg = r;
+        res.reg_map[iv.reg] = r;
+        if (r[0] == 's' && !recorded_callee.count(r)) {
+            recorded_callee.insert(r);
+            res.used_callee_regs.push_back(r);
+        }
+    };
+    auto assign_spill = [&](LiveInterval& iv) {
+        res.spill_bytes += 4;
+        iv.spill_slot = res.spill_bytes;
+        res.spill_slot[iv.reg] = iv.spill_slot;
+    };
+    std::vector<LiveInterval*> active;
+    for (auto& cur : intervals) {
+        for (auto it = active.begin(); it != active.end(); ) {
+            if ((*it)->end <= cur.start) {
+                release_reg((*it)->phys_reg);
+                it = active.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        std::string chosen;
+        if (!cur.crosses_call && !free_caller.empty()) {
+            chosen = alloc_from(free_caller);
+        } else if (!free_callee.empty()) {
+            chosen = alloc_from(free_callee);
+        }
+        if (!chosen.empty()) {
+            assign_phys(cur, chosen);
+            active.push_back(&cur);
+            std::sort(active.begin(), active.end(), [](const auto* a, const auto* b) {
+                return a->end < b->end;
+            });
+        } else {
+            LiveInterval* victim = nullptr;
+            for (auto* act : active) {
+                if (cur.crosses_call && act->phys_reg[0] != 's') continue;
+                if (!victim || act->end > victim->end) {
+                    victim = act;
+                }
+            }
+            if (victim && victim->end > cur.end) {
+                std::string stolen = victim->phys_reg;
+                victim->phys_reg.clear();
+                res.reg_map.erase(victim->reg);
+                assign_spill(*victim);
+                active.erase(std::find(active.begin(), active.end(), victim));
+                assign_phys(cur, stolen);
+                active.push_back(&cur);
+                std::sort(active.begin(), active.end(), [](const auto* a, const auto* b) {
+                    return a->end < b->end;
+                });
+            } else {
+                assign_spill(cur);
+            }
+        }
+    }
+    int base_offset = -16 - 8 * static_cast<int>(res.used_callee_regs.size());
+    for (auto& [vreg, rel_bytes] : res.spill_slot) {
+        res.spill_slot[vreg] = base_offset - rel_bytes;
+    }
+    return res;
+}
+
+void CodeGen::debug_emit_ld(const std::string& rd, int offset) {
+    if (offset >= -2048 && offset <= 2047) {
+        debug_insts.push_back({"ld", rd, "s0", "", offset, ""});
+    } else {
+        debug_insts.push_back({"li", "t6", "", "", offset, ""});
+        debug_insts.push_back({"add", "t6", "s0", "t6", 0, ""});
+        debug_insts.push_back({"ld", rd, "t6", "", 0, ""});
+    }
+}
+
+void CodeGen::debug_emit_lw(const std::string& rd, int offset) {
+    if (offset >= -2048 && offset <= 2047) {
+        debug_insts.push_back({"lw", rd, "s0", "", offset, ""});
+    } else {
+        debug_insts.push_back({"li", "t6", "", "", offset, ""});
+        debug_insts.push_back({"add", "t6", "s0", "t6", 0, ""});
+        debug_insts.push_back({"lw", rd, "t6", "", 0, ""});
+    }
+}
+
+void CodeGen::debug_emit_sd(const std::string& rs, int offset) {
+    if (offset >= -2048 && offset <= 2047) {
+        debug_insts.push_back({"sd", "", "s0", rs, offset, ""});
+    } else {
+        debug_insts.push_back({"li", "t6", "", "", offset, ""});
+        debug_insts.push_back({"add", "t6", "t6", "s0", 0, ""});
+        debug_insts.push_back({"sd", "", "t6", rs, 0, ""});
+    }
+}
+
+void CodeGen::debug_emit_sw(const std::string& rs, int offset) {
+    if (offset >= -2048 && offset <= 2047) {
+        debug_insts.push_back({"sw", "", "s0", rs, offset, ""});
+    } else {
+        debug_insts.push_back({"li", "t6", "", "", offset, ""});
+        debug_insts.push_back({"add", "t6", "t6", "s0", 0, ""});
+        debug_insts.push_back({"sw", "", "t6", rs, 0, ""});
+    }
+}
+
+void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& func) {
+    int raw_size = 16 + 8 * static_cast<int>(alloc.used_callee_regs.size()) + alloc.spill_bytes;
+    int frame_size = (raw_size + 15) & ~15;
+    std::string epilogue_label = "Lret_" + func.name;
+    debug_insts.push_back(AsmInst{ "globl", "", "", "", 0, func.name });
+    debug_insts.push_back(AsmInst{ "label", "", "", "", 0, func.name });
+    if (frame_size <= 2048) {
+        debug_insts.push_back(AsmInst{ "addi", "sp", "sp", "", -frame_size, "" });
+        debug_insts.push_back(AsmInst{ "sd", "", "sp", "ra", frame_size - 8, "" });
+        debug_insts.push_back(AsmInst{ "sd", "", "sp", "s0", frame_size - 16, "" });
+        debug_insts.push_back(AsmInst{ "addi", "s0", "sp", "", frame_size, "" });
+    } else {
+        debug_insts.push_back(AsmInst{ "li", "t3", "", "", -frame_size, "" });
+        debug_insts.push_back(AsmInst{ "add", "sp", "sp", "t3", 0, "" });
+        debug_insts.push_back(AsmInst{ "li", "t3", "", "", frame_size, "" });
+        debug_insts.push_back(AsmInst{ "add", "t3", "sp", "t3", 0, "" });
+        debug_insts.push_back(AsmInst{ "sd", "", "t3", "ra", -8, "" });
+        debug_insts.push_back(AsmInst{ "sd", "", "t3", "s0", -16, "" });
+        debug_insts.push_back(AsmInst{ "mv", "s0", "t3", "", 0, "" });
+    }
+    for (size_t i = 0; i < alloc.used_callee_regs.size(); ++i) {
+        int off = -24 - static_cast<int>(i) * 8;
+        debug_emit_sd(alloc.used_callee_regs[i], off);
+    }
+    std::vector<std::pair<std::string, std::string>> reg_param_moves;
+    for (size_t i = 0; i < func.params.size() && i < 8; ++i) {
+        const std::string& p = func.params[i];
+        std::string arg_reg = "a" + std::to_string(i);
+        if (alloc.reg_map.count(p)) {
+            std::string dst_reg = alloc.reg_map[p];
+            if (dst_reg != arg_reg) {
+                reg_param_moves.push_back({dst_reg, arg_reg});
+            }
+        } else if (alloc.spill_slot.count(p)) {
+            debug_emit_sw(arg_reg, alloc.spill_slot[p]);
+        }
+    }
+    while (!reg_param_moves.empty()) {
+        bool progress = false;
+        for (size_t i = 0; i < reg_param_moves.size(); ++i) {
+            bool dst_is_needed = false;
+            for (size_t j = 0; j < reg_param_moves.size(); ++j) {
+                if (i != j && reg_param_moves[j].second == reg_param_moves[i].first) {
+                    dst_is_needed = true;
+                    break;
+                }
+            }
+            if (!dst_is_needed) {
+                debug_insts.push_back({"mv", reg_param_moves[i].first, reg_param_moves[i].second, "", 0, ""});
+                reg_param_moves.erase(reg_param_moves.begin() + i);
+                progress = true;
+                break;
+            }
+        }
+        if (!progress) {
+            std::string cycle_reg = reg_param_moves[0].second;
+            debug_insts.push_back({"mv", "t5", cycle_reg, "", 0, ""});
+            for (auto& mv : reg_param_moves) {
+                if (mv.second == cycle_reg) mv.second = "t5";
+            }
+        }
+    }
+    std::unordered_map<std::string, int> vreg_uses;
+    for (const auto& blk : blocks) {
+        for (const auto& inst : blk.insts) {
+            for (const auto& u : get_uses(inst)) {
+                vreg_uses[u]++;
+            }
+        }
+    }
+    auto is_icmp = [](IROp op) {
+        return op == IROp::ICMP_EQ  || op == IROp::ICMP_NE  ||
+            op == IROp::ICMP_SLT || op == IROp::ICMP_SGT ||
+            op == IROp::ICMP_SLE || op == IROp::ICMP_SGE;
+    };
+    for (size_t b = 0; b < blocks.size(); ++b) {
+        const auto& block = blocks[b];
+        if (b > 0) {
+            debug_insts.push_back({"label", "", "", "", 0, "." + func.name + "_" + block.label});
+        }
+        for (size_t i = 0; i < block.insts.size(); ++i) {
+            const auto& inst = block.insts[i];
+            if (i + 1 < block.insts.size() && is_icmp(inst.op) &&
+                block.insts[i + 1].op == IROp::BR_COND &&
+                block.insts[i + 1].src1 == inst.dst && vreg_uses[inst.dst] == 1) {
+                const auto& br = block.insts[i + 1];
+                std::string r1 = use_operand(inst.src1, "t5");
+                std::string r2 = use_operand(inst.src2, "t6");
+                std::string L_true = "." + func.name + "_" + br.dst;
+                std::string L_false = "." + func.name + "_" + br.src2;
+                switch (inst.op) {
+                    case IROp::ICMP_EQ: debug_insts.push_back({"beq", "", r1, r2, 0, L_true}); break;
+                    case IROp::ICMP_NE: debug_insts.push_back({"bne", "", r1, r2, 0, L_true}); break;
+                    case IROp::ICMP_SLT: debug_insts.push_back({"blt", "", r1, r2, 0, L_true}); break;
+                    case IROp::ICMP_SGE: debug_insts.push_back({"bge", "", r1, r2, 0, L_true}); break;
+                    case IROp::ICMP_SGT: debug_insts.push_back({"blt", "", r2, r1, 0, L_true}); break;
+                    case IROp::ICMP_SLE: debug_insts.push_back({"bge", "", r2, r1, 0, L_true}); break;
+                    default: break;
+                }
+                debug_insts.push_back({"j", "", "", "", 0, L_false});
+                ++i;
+                continue;
+            }
+            switch (inst.op) {
+                case IROp::ADD:
+                case IROp::SUB:
+                case IROp::MUL:
+                case IROp::SDIV:
+                case IROp::SREM: {
+                    std::string r1 = use_operand(inst.src1, "t5");
+                    std::string r2 = use_operand(inst.src2, "t6");
+                    std::string rd = def_operand(inst.dst, "t5");
+                    std::string riscv_op =
+                        (inst.op == IROp::ADD) ? "addw" :
+                        (inst.op == IROp::SUB) ? "subw" :
+                        (inst.op == IROp::MUL) ? "mulw" :
+                        (inst.op == IROp::SDIV) ? "divw" : "remw";
+                    debug_insts.push_back({riscv_op, rd, r1, r2, 0, ""});
+                    commit_dst(inst.dst, "t5");
+                    break;
+                }
+                case IROp::ICMP_EQ:
+                case IROp::ICMP_NE:
+                case IROp::ICMP_SLT:
+                case IROp::ICMP_SGT:
+                case IROp::ICMP_SLE:
+                case IROp::ICMP_SGE: {
+                    std::string r1 = use_operand(inst.src1, "t5");
+                    std::string r2 = use_operand(inst.src2, "t6");
+                    std::string rd = def_operand(inst.dst, "t5");
+                    if (inst.op == IROp::ICMP_SLT) {
+                        debug_insts.push_back({"slt", rd, r1, r2, 0, ""});
+                    } else if (inst.op == IROp::ICMP_SGT) {
+                        debug_insts.push_back({"slt", rd, r2, r1, 0, ""});
+                    } else if (inst.op == IROp::ICMP_SLE) {
+                        debug_insts.push_back({"slt", rd, r2, r1, 0, ""});
+                        debug_insts.push_back({"xori", rd, rd, "", 1, ""});
+                    } else if (inst.op == IROp::ICMP_SGE) {
+                        debug_insts.push_back({"slt", rd, r1, r2, 0, ""});
+                        debug_insts.push_back({"xori", rd, rd, "", 1, ""});
+                    } else if (inst.op == IROp::ICMP_EQ) {
+                        debug_insts.push_back({"subw", rd, r1, r2, 0, ""});
+                        debug_insts.push_back({"seqz", rd, rd, "", 0, ""});
+                    } else if (inst.op == IROp::ICMP_NE) {
+                        debug_insts.push_back({"subw", rd, r1, r2, 0, ""});
+                        debug_insts.push_back({"snez", rd, rd, "", 0, ""});
+                    }
+                    commit_dst(inst.dst, "t5");
+                    break;
+                }
+                case IROp::MOV: {
+                    if (!inst.src1.empty() && inst.src1[0] != '%') {
+                        std::string rd = def_operand(inst.dst, "t5");
+                        debug_insts.push_back({"li", rd, "", "", std::stoi(inst.src1), ""});
+                        commit_dst(inst.dst, "t5");
+                    } else {
+                        std::string rs = use_operand(inst.src1, "t5");
+                        std::string rd = def_operand(inst.dst, "t5");
+                        if (rd != rs) {
+                            debug_insts.push_back({"sext.w", rd, rs, "", 0, ""});
+                        }
+                        commit_dst(inst.dst, "t5");
+                    }
+                    break;
+                }
+                case IROp::JMP: {
+                    debug_insts.push_back({"j", "", "", "", 0, "." + func.name + "_" + inst.dst});
+                    break;
+                }
+                case IROp::BR_COND: {
+                    std::string r_cond = use_operand(inst.src1, "t5");
+                    debug_insts.push_back({"bnez", "", r_cond, "", 0, "." + func.name + "_" + inst.dst});
+                    debug_insts.push_back({"j", "", "", "", 0, "." + func.name + "_" + inst.src2});
+                    break;
+                }
+                case IROp::CALL: {
+                    std::vector<std::pair<std::string, std::string>> arg_moves;
+                    for (size_t k = 0; k < inst.args.size() && k < 8; ++k) {
+                        arg_moves.push_back({"a" + std::to_string(k), inst.args[k]});
+                    }
+                    emit_parallel_moves(arg_moves);
+                    debug_insts.push_back({"call", "", "", "", 0, inst.src1});
+                    if (!inst.dst.empty()) {
+                        if (alloc.reg_map.count(inst.dst)) {
+                            if (alloc.reg_map[inst.dst] != "a0") {
+                                debug_insts.push_back({"mv", alloc.reg_map[inst.dst], "a0", "", 0, ""});
+                            }
+                        } else if (alloc.spill_slot.count(inst.dst)) {
+                            emit_sw("a0", alloc.spill_slot[inst.dst]);
+                        }
+                    }
+                    break;
+                }
+                case IROp::RET: {
+                    if (!inst.src1.empty()) {
+                        if (inst.src1[0] != '%') {
+                            debug_insts.push_back({"li", "a0", "", "", std::stoi(inst.src1), ""});
+                        } else if (alloc.reg_map.count(inst.src1)) {
+                            if (alloc.reg_map[inst.src1] != "a0") {
+                                debug_insts.push_back({"mv", "a0", alloc.reg_map[inst.src1], "", 0, ""});
+                            }
+                        } else {
+                            emit_lw("a0", alloc.spill_slot[inst.src1]);
+                        }
+                    }
+                    debug_insts.push_back({"j", "", "", "", 0, "." + func.name + "_" + epilogue_label});
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+    debug_insts.push_back(AsmInst{ "label", "", "", "", 0, "." + func.name + "_" + epilogue_label });
+    for (size_t i = 0; i < alloc.used_callee_regs.size(); ++i) {
+        int off = -24 - static_cast<int>(i) * 8;
+        debug_emit_ld(alloc.used_callee_regs[i], off);
+    }
+    debug_insts.push_back(AsmInst{ "ld", "ra", "s0", "", -8, "" });
+    debug_insts.push_back(AsmInst{ "ld", "s0", "s0", "", -16, "" });
+    if (frame_size <= 2047) {
+        debug_insts.push_back(AsmInst{ "addi", "sp", "sp", "", frame_size, "" });
+    } else {
+        debug_insts.push_back(AsmInst{ "li", "t3", "", "", frame_size, "" });
+        debug_insts.push_back(AsmInst{ "add", "sp", "sp", "t3", 0, "" });
+    }
+    debug_insts.push_back(AsmInst{ "ret", "", "", "", 0, "" });
+}
+
+std::string CodeGen::use_operand(const std::string& op, const std::string& scratch) {
+    if (op.empty()) return "";
+    if (op[0] != '%') {
+        debug_insts.push_back({"li", scratch, "", "", std::stoi(op), ""});
+        return scratch;
+    }
+    if (alloc.reg_map.count(op)) {
+        return alloc.reg_map[op];
+    }
+    emit_lw(scratch, alloc.spill_slot[op]);
+    return scratch;
+}
+
+std::string CodeGen::def_operand(const std::string& dst, const std::string& scratch) {
+    if (alloc.reg_map.count(dst)) {
+        return alloc.reg_map[dst];
+    }
+    return scratch;
+}
+
+void CodeGen::commit_dst(const std::string& dst, const std::string& scratch) {
+    if (!alloc.reg_map.count(dst)) {
+        emit_sw(scratch, alloc.spill_slot[dst]);
+    }
+}
+
+void CodeGen::emit_parallel_moves(const std::vector<std::pair<std::string, std::string>>& moves) {
+    struct MoveTask {
+        std::string dst_reg;
+        std::string src_reg;
+        std::string raw_src;
+    };
+    std::vector<MoveTask> reg_moves;
+    std::vector<MoveTask> other_moves;
+    for (const auto& [dst_r, src] : moves) {
+        if (!src.empty() && src[0] == '%' && alloc.reg_map.count(src)) {
+            std::string sr = alloc.reg_map[src];
+            if (dst_r != sr) reg_moves.push_back({dst_r, sr, src});
+        } else {
+            other_moves.push_back({dst_r, "", src});
+        }
+    }
+    while (!reg_moves.empty()) {
+        bool progress = false;
+        for (size_t i = 0; i < reg_moves.size(); ++i) {
+            bool dst_is_needed = false;
+            for (size_t j = 0; j < reg_moves.size(); ++j) {
+                if (i != j && reg_moves[j].src_reg == reg_moves[i].dst_reg) {
+                    dst_is_needed = true;
+                    break;
+                }
+            }
+            if (!dst_is_needed) {
+                debug_insts.push_back({"mv", reg_moves[i].dst_reg, reg_moves[i].src_reg, "", 0, ""});
+                reg_moves.erase(reg_moves.begin() + i);
+                progress = true;
+                break;
+            }
+        }
+        if (!progress) {
+            std::string cycle_reg = reg_moves[0].src_reg;
+            debug_insts.push_back({"mv", "t5", cycle_reg, "", 0, ""});
+            for (auto& task : reg_moves) {
+                if (task.src_reg == cycle_reg) task.src_reg = "t5";
+            }
+        }
+    }
+    for (const auto& task : other_moves) {
+        if (task.raw_src[0] != '%') {
+            debug_insts.push_back({"li", task.dst_reg, "", "", std::stoi(task.raw_src), ""});
+        } else {
+            emit_lw(task.dst_reg, alloc.spill_slot[task.raw_src]);
         }
     }
 }

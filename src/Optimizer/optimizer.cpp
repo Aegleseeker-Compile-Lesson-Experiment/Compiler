@@ -10,7 +10,7 @@ bool is_int_literal(const std::string& s) {
     return true;
 }
 
-void optimize_ir(IRFunc& fn) {
+void optimize_ir(std::vector<IRInst>& insts) {
     /* Const value
      * Delete unused variables
      * Delete dead circles
@@ -19,7 +19,7 @@ void optimize_ir(IRFunc& fn) {
     auto resolve = [&](std::string& op) {
         while (const_map.count(op)) op = const_map[op];
     };
-    for (auto& inst : fn.insts) {
+    for (auto& inst : insts) {
         resolve(inst.src1);
         resolve(inst.src2);
         for (auto& a : inst.args) resolve(a);
@@ -49,14 +49,14 @@ void optimize_ir(IRFunc& fn) {
         if (inst.op == IROp::BR_COND && is_int_literal(inst.src1)) {
             int cond = std::stoi(inst.src1);
             std::string target = (cond != 0) ? inst.dst : inst.src2;
-            inst = {IROp::JMP, target, "", "", {}};
+            inst = {IROp::JMP, target, "", "", {}, {}};
         }
     }
     bool cfg_changed = true;
     while (cfg_changed) {
         cfg_changed = false;
         std::unordered_set<std::string> referenced_labels;
-        for (const auto& inst : fn.insts) {
+        for (const auto& inst : insts) {
             if (inst.op == IROp::JMP) {
                 referenced_labels.insert(inst.dst);
             } else if (inst.op == IROp::BR_COND) {
@@ -66,10 +66,10 @@ void optimize_ir(IRFunc& fn) {
         }
         std::vector<IRInst> cleaned;
         bool dead_region = false;
-        for (size_t i = 0; i < fn.insts.size(); ++i) {
-            const auto& inst = fn.insts[i];
+        for (size_t i = 0; i < insts.size(); ++i) {
+            const auto& inst = insts[i];
             if (inst.op == IROp::LABEL) {
-                bool prev_is_term = (i > 0) && (fn.insts[i - 1].op == IROp::JMP || fn.insts[i - 1].op == IROp::RET);
+                bool prev_is_term = (i > 0) && (insts[i - 1].op == IROp::JMP || insts[i - 1].op == IROp::RET);
                 if (prev_is_term && !referenced_labels.count(inst.dst)) {
                     dead_region = true;
                     cfg_changed = true;
@@ -84,7 +84,7 @@ void optimize_ir(IRFunc& fn) {
                 dead_region = true;
             }
         }
-        fn.insts = std::move(cleaned);
+        insts = std::move(cleaned);
     }
     auto run_dce = [&]() {
         bool changed = true;
@@ -92,7 +92,7 @@ void optimize_ir(IRFunc& fn) {
             changed = false;
             std::unordered_map<std::string, int> load_cnt;
             std::unordered_map<std::string, int> use_cnt;
-            for (const auto& inst : fn.insts) {
+            for (const auto& inst : insts) {
                 if (inst.op == IROp::LOAD) load_cnt[inst.src1]++;
                 if (!inst.src1.empty() && inst.src1[0] == '%') use_cnt[inst.src1]++;
                 if (!inst.src2.empty() && inst.src2[0] == '%') use_cnt[inst.src2]++;
@@ -101,8 +101,8 @@ void optimize_ir(IRFunc& fn) {
                 }
             }
             std::vector<IRInst> next_insts;
-            next_insts.reserve(fn.insts.size());
-            for (const auto& inst : fn.insts) {
+            next_insts.reserve(insts.size());
+            for (const auto& inst : insts) {
                 if (inst.op == IROp::ALLOCA && load_cnt[inst.dst] == 0) {
                     changed = true;
                     continue;
@@ -122,28 +122,28 @@ void optimize_ir(IRFunc& fn) {
                 }
                 next_insts.push_back(inst);
             }
-            fn.insts = std::move(next_insts);
+            insts = std::move(next_insts);
         }
     };
     run_dce();
     bool loop_removed = true;
     while (loop_removed) {
         loop_removed = false;
-        for (size_t c = 0; c + 4 < fn.insts.size(); ++c) {
-            if (fn.insts[c].op != IROp::LABEL) continue;
-            std::string l_cond = fn.insts[c].dst;
+        for (size_t c = 0; c + 4 < insts.size(); ++c) {
+            if (insts[c].op != IROp::LABEL) continue;
+            std::string l_cond = insts[c].dst;
             size_t b = 0, e = 0;
             bool valid_shape = false;
-            for (size_t i = c + 1; i < fn.insts.size(); ++i) {
-                auto op = fn.insts[i].op;
+            for (size_t i = c + 1; i < insts.size(); ++i) {
+                auto op = insts[i].op;
                 if (op == IROp::CALL || op == IROp::RET) break;
                 if (op == IROp::BR_COND && b == 0) {
-                    if (i + 1 < fn.insts.size() && fn.insts[i + 1].op == IROp::LABEL && fn.insts[i + 1].dst == fn.insts[i].dst) {
+                    if (i + 1 < insts.size() && insts[i + 1].op == IROp::LABEL && insts[i + 1].dst == insts[i].dst) {
                         b = ++i;
                     } else break;
                 } else if (op == IROp::JMP && b != 0) {
-                    if (fn.insts[i].dst == l_cond && i + 1 < fn.insts.size() &&
-                        fn.insts[i + 1].op == IROp::LABEL && fn.insts[i + 1].dst == fn.insts[b - 1].src2) {
+                    if (insts[i].dst == l_cond && i + 1 < insts.size() &&
+                        insts[i + 1].op == IROp::LABEL && insts[i + 1].dst == insts[b - 1].src2) {
                         e = i + 1;
                         valid_shape = true;
                     }
@@ -156,21 +156,21 @@ void optimize_ir(IRFunc& fn) {
             std::unordered_set<std::string> loop_stores;
             std::unordered_set<std::string> cond_loads;
             for (size_t i = c + 1; i < b - 1; ++i) {
-                if (fn.insts[i].op == IROp::LOAD) cond_loads.insert(fn.insts[i].src1);
+                if (insts[i].op == IROp::LOAD) cond_loads.insert(insts[i].src1);
             }
             bool has_progress = false;
             std::unordered_map<std::string, std::string> loaded_from;
             for (size_t i = b + 1; i < e - 1; ++i) {
-                const auto& inst = fn.insts[i];
+                const auto& inst = insts[i];
                 if (inst.op == IROp::LOAD) loaded_from[inst.dst] = inst.src1;
                 if (inst.op == IROp::STORE) {
                     loop_stores.insert(inst.src2);
                     if (cond_loads.count(inst.src2)) {
                         for (size_t k = b + 1; k < i; ++k) {
-                            if (fn.insts[k].dst == inst.src1 &&
-                                (fn.insts[k].op == IROp::ADD || fn.insts[k].op == IROp::SUB) &&
-                                loaded_from[fn.insts[k].src1] == inst.src2 &&
-                                is_int_literal(fn.insts[k].src2) && std::stoi(fn.insts[k].src2) != 0) {
+                            if (insts[k].dst == inst.src1 &&
+                                (insts[k].op == IROp::ADD || insts[k].op == IROp::SUB) &&
+                                loaded_from[insts[k].src1] == inst.src2 &&
+                                is_int_literal(insts[k].src2) && std::stoi(insts[k].src2) != 0) {
                                 has_progress = true;
                             }
                         }
@@ -179,17 +179,17 @@ void optimize_ir(IRFunc& fn) {
             }
             if (!has_progress || loop_stores.empty()) continue;
             bool used_outside = false;
-            for (size_t i = 0; i < fn.insts.size(); ++i) {
+            for (size_t i = 0; i < insts.size(); ++i) {
                 if (i >= c && i <= e) continue;
-                if (fn.insts[i].op == IROp::LOAD && loop_stores.count(fn.insts[i].src1)) {
+                if (insts[i].op == IROp::LOAD && loop_stores.count(insts[i].src1)) {
                     used_outside = true;
                     break;
                 }
             }
             if (used_outside) continue;
-            std::string l_end = fn.insts[e].dst;
-            fn.insts.erase(fn.insts.begin() + c + 1, fn.insts.begin() + e);
-            fn.insts.insert(fn.insts.begin() + c + 1, {IROp::JMP, l_end, "", "", {}});
+            std::string l_end = insts[e].dst;
+            insts.erase(insts.begin() + c + 1, insts.begin() + e);
+            insts.insert(insts.begin() + c + 1, {IROp::JMP, l_end, "", "", {}, {}});
             run_dce();
             loop_removed = true;
             break;
@@ -198,9 +198,10 @@ void optimize_ir(IRFunc& fn) {
 }
 
 void optimize_cg(std::vector<AsmInst>& insts) {
-    /* 
-     * 
-     * 
+    /* Store-Load forwarding
+     * Redundancy folding between registers
+     * Eliminate redirects by using direct links
+     * Self-copying instruction
     */
    auto get_next = [&](size_t index) {
         for (size_t i = index + 1; i < insts.size(); ++i) {

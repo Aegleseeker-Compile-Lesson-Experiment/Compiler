@@ -9,7 +9,7 @@
 #include <unordered_set>
 
 bool is_int_literal(const std::string& s);
-void optimize_ir(IRFunc& fn);
+void optimize_ir(std::vector<IRInst>& insts);
 void optimize_cg(std::vector<AsmInst>& insts);
 
 #endif //!OPTIMIZER_H

@@ -47,7 +47,8 @@ enum class IROp {
     ALLOCA, LOAD, STORE,
     ADD, SUB, MUL, SDIV, SREM,
     ICMP_EQ, ICMP_NE, ICMP_SLT, ICMP_SGT, ICMP_SLE, ICMP_SGE,
-    LABEL, JMP, BR_COND, CALL, RET
+    LABEL, JMP, BR_COND, CALL, RET,
+    PHI, MOV
 };
 
 struct ASTNode {
@@ -90,10 +91,18 @@ struct Block {
 
 struct IRInst {
     IROp op;
-    std::string dst;
-    std::string src1;
-    std::string src2;
+    std::string dst, src1, src2;
     std::vector<std::string> args;
+    std::vector<std::pair<std::string, std::string>> phi_in;
+};
+
+struct IRBlock {
+    std::string label;
+    std::vector<IRInst> insts;
+    std::vector<int> preds;
+    std::vector<int> succs;
+    bool used;
+    IRBlock(std::string label): label(label), used(false) {}
 };
 
 struct IRFunc {
@@ -103,6 +112,15 @@ struct IRFunc {
     std::vector<IRInst> insts;
 };
 
+struct LiveInterval {
+    std::string reg;
+    int start = 1e9;
+    int end = -1;
+    bool crosses_call = false;
+    std::string phys_reg;
+    int spill_slot = -1;
+};
+
 struct AsmInst {
     std::string op;
     std::string rd;
@@ -110,6 +128,13 @@ struct AsmInst {
     std::string rs2;
     int imm = 0;
     std::string label;
+};
+
+struct RegAllocResult {
+    std::unordered_map<std::string, std::string> reg_map;
+    std::unordered_map<std::string, int> spill_slot;
+    std::vector<std::string> used_callee_regs;
+    int spill_bytes = 0;
 };
 
 namespace Global {
