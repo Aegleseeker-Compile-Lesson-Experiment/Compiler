@@ -1048,20 +1048,67 @@ void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& f
             }
             switch (inst.op) {
                 case IROp::ADD:
-                case IROp::SUB:
-                case IROp::MUL:
-                case IROp::SDIV:
-                case IROp::SREM: {
+                case IROp::SUB: {
                     std::string r1 = use_operand(inst.src1, "t5");
                     std::string r2 = use_operand(inst.src2, "t6");
                     std::string rd = def_operand(inst.dst, "t5");
-                    std::string riscv_op =
-                        (inst.op == IROp::ADD) ? "addw" :
-                        (inst.op == IROp::SUB) ? "subw" :
-                        (inst.op == IROp::MUL) ? "mulw" :
-                        (inst.op == IROp::SDIV) ? "divw" : "remw";
+                    std::string riscv_op = (inst.op == IROp::ADD) ? "addw" : "subw";
                     debug_insts.push_back({riscv_op, rd, r1, r2, 0, ""});
                     commit_dst(inst.dst, "t5");
+                    break;
+                }
+                case IROp::MUL: {
+                    bool c1 = !inst.src1.empty() && inst.src1[0] != '%';
+                    bool c2 = !inst.src2.empty() && inst.src2[0] != '%';
+                    if (c1 && c2) {
+                        int32_t prod = static_cast<int32_t>(std::stoll(inst.src1) * std::stoll(inst.src2));
+                        std::string rd = def_operand(inst.dst, "t5");
+                        debug_insts.push_back({"li", rd, "", "", prod, ""});
+                        commit_dst(inst.dst, "t5");
+                    } else if (c2) {
+                        debug_gen_mul(inst.dst, inst.src1, std::stoi(inst.src2));
+                    } else if (c1) {
+                        debug_gen_mul(inst.dst, inst.src2, std::stoi(inst.src1));
+                    } else {
+                        std::string r1 = use_operand(inst.src1, "t5");
+                        std::string r2 = use_operand(inst.src2, "t6");
+                        std::string rd = def_operand(inst.dst, "t5");
+                        debug_insts.push_back({"mulw", rd, r1, r2, 0, ""});
+                        commit_dst(inst.dst, "t5");
+                    }
+                    break;
+                }
+                case IROp::SDIV:
+                case IROp::SREM: {
+                    bool is_div = (inst.op == IROp::SDIV);
+                    bool c1 = !inst.src1.empty() && inst.src1[0] != '%';
+                    bool c2 = !inst.src2.empty() && inst.src2[0] != '%';
+                    if (c1 && c2) {
+                        int32_t a = static_cast<int32_t>(std::stoll(inst.src1));
+                        int32_t b = static_cast<int32_t>(std::stoll(inst.src2));
+                        if (b != 0 && !(a == ~(1 << 31) && b == -1)) {
+                            int32_t res = is_div ? (a / b) : (a % b);
+                            std::string rd = def_operand(inst.dst, "t5");
+                            debug_insts.push_back({"li", rd, "", "", res, ""});
+                            commit_dst(inst.dst, "t5");
+                            break;
+                        }
+                    }
+                    if (c2) {
+                        int val = static_cast<int>(std::stoll(inst.src2));
+                        if (is_div) debug_gen_div(inst.dst, inst.src1, val, true);
+                        else debug_gen_rem(inst.dst, inst.src1, val, true);
+                    } else if (c1) {
+                        int val = static_cast<int>(std::stoll(inst.src1));
+                        if (is_div) debug_gen_div(inst.dst, inst.src2, val, false);
+                        else debug_gen_rem(inst.dst, inst.src2, val, false);
+                    } else {
+                        std::string r1 = use_operand(inst.src1, "t5");
+                        std::string r2 = use_operand(inst.src2, "t6");
+                        std::string rd = def_operand(inst.dst, "t5");
+                        debug_insts.push_back({is_div ? "divw" : "remw", rd, r1, r2, 0, ""});
+                        commit_dst(inst.dst, "t5");
+                    }
                     break;
                 }
                 case IROp::ICMP_EQ:
@@ -1256,5 +1303,372 @@ void CodeGen::emit_parallel_moves(const std::vector<std::pair<std::string, std::
         } else {
             debug_emit_lw(task.dst_reg, alloc.spill_slot[task.raw_src]);
         }
+    }
+}
+
+void CodeGen::debug_gen_mul(const std::string& dst_vreg, const std::string& var_op, int value) {
+    std::string r_in = use_operand(var_op, "t5");
+    std::string rd = def_operand(dst_vreg, "t5");
+    if (value == 0) {
+        debug_insts.push_back({"li", rd, "", "", 0, ""});
+        commit_dst(dst_vreg, "t5");
+        return;
+    }
+    if (value == 1) {
+        if (rd != r_in) {
+            debug_insts.push_back({"sext.w", rd, r_in, "", 0, ""});
+        }
+        commit_dst(dst_vreg, "t5");
+        return;
+    }
+    if (value == -1) {
+        debug_insts.push_back({"subw", rd, "zero", r_in, 0, ""});
+        commit_dst(dst_vreg, "t5");
+        return;
+    }
+    bool allow_t1 = (r_in != "t5");
+    struct Inst { int op, dst, s1, s2; } plan[4];
+    int step_cnt = 0;
+    unsigned int target = static_cast<unsigned int>(value);
+    auto dfs = [&](auto& self, int d, int max_d, bool h1, unsigned int v1, bool h2, unsigned int v2) -> bool {
+        if (d == max_d) return h2 && v2 == target;
+        int rem = max_d - d;
+        int sr[4] = {0, 1}, nsrc = 2;
+        unsigned int sv[4] = {0, 1};
+        if (h1) { sr[nsrc] = 2; sv[nsrc++] = v1; }
+        if (h2) { sr[nsrc] = 3; sv[nsrc++] = v2; }
+        int dsts[2] = {3, 2};
+        int ndst = (rem == 1 || !allow_t1 || (!h1 && !h2)) ? 1 : 2;
+        for (int di = 0; di < ndst; ++di) {
+            int dst = dsts[di];
+            auto try_step = [&](int op, int s1, int s2, unsigned int res) -> bool {
+                bool nh1 = h1 || (dst == 2), nh2 = h2 || (dst == 3);
+                unsigned int nv1 = (dst == 2) ? res : v1, nv2 = (dst == 3) ? res : v2;
+                if (nh1 == h1 && nh2 == h2 && nv1 == v1 && nv2 == v2) return false;
+                plan[d] = {op, dst, s1, s2};
+                return self(self, d + 1, max_d, nh1, nv1, nh2, nv2);
+            };
+            for (int i = 0; i < nsrc; ++i) {
+                if (!sv[i]) continue;
+                if (rem == 1) {
+                    if (target) {
+                        int sh = __builtin_ctz(target) - __builtin_ctz(sv[i]);
+                        if (sh >= 1 && sh <= 31 && (sv[i] << sh) == target && try_step(2, sr[i], sh, target)) {
+                            return true;
+                        }
+                    }
+                } else {
+                    for (int sh = 1; sh <= 31 && (sv[i] << sh); ++sh) {
+                        if (try_step(2, sr[i], sh, sv[i] << sh)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < nsrc; ++i) {
+                for (int j = i; j < nsrc; ++j) {
+                    if ((sr[i] != 0 || rem == 1) && try_step(0, sr[j], sr[i], sv[i] + sv[j])) {
+                        return true;
+                    }
+                }
+            }
+            for (int i = 0; i < nsrc; ++i) {
+                for (int j = 0; j < nsrc; ++j) {
+                    if (i != j && sr[j] != 0 && try_step(1, sr[i], sr[j], sv[i] - sv[j])) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    for (int max_d = 1; max_d <= 4; ++max_d) {
+        if (dfs(dfs, 0, max_d, false, 0, false, 0)) {
+            step_cnt = max_d;
+            break;
+        }
+    }
+    const char* regs[] = {"zero", r_in.c_str(), "t5", "t6"};
+    bool dst_in_phys = alloc.reg_map.count(dst_vreg) > 0;
+    if (step_cnt > 0) {
+        for (int i = 0; i < step_cnt; ++i) {
+            auto [op, dst, s1, s2] = plan[i];
+            std::string out_reg = (i == step_cnt - 1 && dst_in_phys) ? rd : regs[dst];
+            if (op == 0) {
+                debug_insts.push_back({"addw", out_reg, regs[s1], regs[s2], 0, ""});
+            } else if (op == 1) {
+                debug_insts.push_back({"subw", out_reg, regs[s1], regs[s2], 0, ""});
+            } else if (op == 2) {
+                debug_insts.push_back({"slliw", out_reg, regs[s1], "", s2, ""});
+            }
+        }
+        if (!dst_in_phys) {
+            debug_insts.push_back({"sext.w", "t5", "t6", "", 0, ""});
+            commit_dst(dst_vreg, "t5");
+        }
+    } else {
+        debug_insts.push_back({"li", "t6", "", "", value, ""});
+        if (dst_in_phys) {
+            debug_insts.push_back({"mulw", rd, r_in, "t6", 0, ""});
+        } else {
+            debug_insts.push_back({"mulw", "t5", r_in, "t6", 0, ""});
+            commit_dst(dst_vreg, "t5");
+        }
+    }
+}
+
+void CodeGen::debug_gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided) {
+    std::string r_in = use_operand(var_op, "t5");
+    std::string rd = def_operand(dst_vreg, "t5");
+    bool dst_in_phys = alloc.reg_map.count(dst_vreg) > 0;
+    if (r_in == "t5") {
+        if (!divided && value == 0) {
+            debug_insts.push_back({"li", "t5", "", "", 0, ""});
+        } else {
+            debug_insts.push_back({"li", "t6", "", "", value, ""});
+            if (divided) {
+                debug_insts.push_back({"divw", "t5", "t5", "t6", 0, ""});
+            } else {
+                debug_insts.push_back({"divw", "t5", "t6", "t5", 0, ""});
+            }
+        }
+        if (dst_in_phys) {
+            debug_insts.push_back({"sext.w", rd, "t5", "", 0, ""});
+        } else {
+            commit_dst(dst_vreg, "t5");
+        }
+        return;
+    }
+    struct Inst { int op, dst, s1, s2; } plan[8];
+    int cnt = 0;
+    if (!divided) {
+        if (value == 0) {
+            plan[cnt++] = {0, 3, 0, 0};
+        } else {
+            plan[cnt++] = {5, 2, value, 0};
+            plan[cnt++] = {7, 3, 2, 1};
+        }
+    } else {
+        if (value == 0) {
+            plan[cnt++] = {7, 3, 1, 0};
+        } else if (value == 1) {
+            plan[cnt++] = {0, 3, 1, 0};
+        } else if (value == -1) {
+            plan[cnt++] = {1, 3, 0, 1};
+        } else if (value == -2147483648) {
+            plan[cnt++] = {5, 2, value, 0};
+            plan[cnt++] = {7, 3, 1, 2};
+        } else {
+            unsigned int ad = (value < 0) ? (0u - static_cast<unsigned int>(value)) : static_cast<unsigned int>(value);
+            if ((ad & (ad - 1)) == 0) {
+                int k = __builtin_ctz(ad);
+                if (k == 1) {
+                    plan[cnt++] = {3, 2, 1, 31};
+                    plan[cnt++] = {0, 3, 1, 2};
+                    plan[cnt++] = {4, 3, 3, 1};
+                } else {
+                    plan[cnt++] = {4, 2, 1, 31};
+                    plan[cnt++] = {3, 2, 2, 32 - k};
+                    plan[cnt++] = {0, 3, 1, 2};
+                    plan[cnt++] = {4, 3, 3, k};
+                }
+                if (value < 0) {
+                    plan[cnt++] = {1, 3, 0, 3};
+                }
+            } else {
+                auto calc_magic = [](int d) -> std::pair<int, int> {
+                    int p = 31;
+                    unsigned int ad = (d < 0) ? (0u - static_cast<unsigned int>(d)) : static_cast<unsigned int>(d);
+                    unsigned int t = 0x80000000u + (static_cast<unsigned int>(d) >> 31);
+                    unsigned int anc = t - 1 - t % ad;
+                    unsigned int q1 = 0x80000000u / anc, r1 = 0x80000000u - q1 * anc;
+                    unsigned int q2 = 0x80000000u / ad,  r2 = 0x80000000u - q2 * ad;
+                    unsigned int delta;
+                    do {
+                        ++p;
+                        q1 <<= 1; r1 <<= 1;
+                        if (r1 >= anc) { ++q1; r1 -= anc; }
+                        q2 <<= 1; r2 <<= 1;
+                        if (r2 >= ad)  { ++q2; r2 -= ad;  }
+                        delta = ad - r2;
+                    } while (q1 < delta || (q1 == delta && r1 == 0));
+                    unsigned int mu = q2 + 1;
+                    if (d < 0) mu = 0u - mu;
+                    return {static_cast<int>(mu), p - 32};
+                };
+                auto [M, s] = calc_magic(value);
+                plan[cnt++] = {5, 2, M, 0};
+                plan[cnt++] = {6, 3, 1, 2};
+                if (value > 0 && M < 0) {
+                    plan[cnt++] = {4, 3, 3, 32};
+                    plan[cnt++] = {0, 3, 3, 1};
+                    if (s > 0) plan[cnt++] = {4, 3, 3, s};
+                } else if (value < 0 && M > 0) {
+                    plan[cnt++] = {4, 3, 3, 32};
+                    plan[cnt++] = {1, 3, 3, 1};
+                    if (s > 0) plan[cnt++] = {4, 3, 3, s};
+                } else {
+                    plan[cnt++] = {4, 3, 3, 32 + s};
+                }
+                plan[cnt++] = {3, 2, 3, 31};
+                plan[cnt++] = {0, 3, 3, 2};
+            }
+        }
+    }
+    const char* regs[] = {"zero", r_in.c_str(), "t5", "t6"};
+    for (int i = 0; i < cnt; ++i) {
+        auto [op, dst, s1, s2] = plan[i];
+        std::string out_reg = (i == cnt - 1 && dst_in_phys) ? rd : regs[dst];
+        if (op == 0) {
+            debug_insts.push_back({"addw", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 1) {
+            debug_insts.push_back({"subw", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 2) {
+            debug_insts.push_back({"slliw", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 3) {
+            debug_insts.push_back({"srliw", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 4) {
+            debug_insts.push_back({"srai", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 5) {
+            debug_insts.push_back({"li", out_reg, "", "", s1, ""});
+        } else if (op == 6) {
+            debug_insts.push_back({"mul", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 7) {
+            debug_insts.push_back({"divw", out_reg, regs[s1], regs[s2], 0, ""});
+        }
+    }
+    if (!dst_in_phys) {
+        debug_insts.push_back({"sext.w", "t5", "t6", "", 0, ""});
+        commit_dst(dst_vreg, "t5");
+    }
+}
+
+void CodeGen::debug_gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided) {
+    std::string r_in = use_operand(var_op, "t5");
+    std::string rd = def_operand(dst_vreg, "t5");
+    bool dst_in_phys = alloc.reg_map.count(dst_vreg) > 0;
+    if (r_in == "t5") {
+        if (!divided && value == 0) {
+            debug_insts.push_back({"li", "t5", "", "", 0, ""});
+        } else {
+            debug_insts.push_back({"li", "t6", "", "", value, ""});
+            if (divided) {
+                debug_insts.push_back({"remw", "t5", "t5", "t6", 0, ""});
+            } else {
+                debug_insts.push_back({"remw", "t5", "t6", "t5", 0, ""});
+            }
+        }
+        if (dst_in_phys) {
+            debug_insts.push_back({"sext.w", rd, "t5", "", 0, ""});
+        } else {
+            commit_dst(dst_vreg, "t5");
+        }
+        return;
+    }
+    struct Inst { int op, dst, s1, s2; } plan[10];
+    int cnt = 0;
+    if (!divided) {
+        if (value == 0) {
+            plan[cnt++] = {0, 3, 0, 0};
+        } else {
+            plan[cnt++] = {5, 2, value, 0};
+            plan[cnt++] = {9, 3, 2, 1};
+        }
+    } else {
+        if (value == 0) {
+            plan[cnt++] = {9, 3, 1, 0};
+        } else if (value == 1 || value == -1) {
+            plan[cnt++] = {0, 3, 0, 0};
+        } else {
+            unsigned int ad = (value < 0) ? (0u - static_cast<unsigned int>(value)) : static_cast<unsigned int>(value);
+            if ((ad & (ad - 1)) == 0) {
+                int k = __builtin_ctz(ad);
+                if (k == 1) {
+                    plan[cnt++] = {3, 2, 1, 31};
+                    plan[cnt++] = {0, 3, 1, 2};
+                    plan[cnt++] = {8, 3, 3, -2};
+                } else if (k <= 11) {
+                    plan[cnt++] = {4, 2, 1, 31};
+                    plan[cnt++] = {3, 2, 2, 32 - k};
+                    plan[cnt++] = {0, 3, 1, 2};
+                    plan[cnt++] = {8, 3, 3, -(1 << k)};
+                } else {
+                    plan[cnt++] = {4, 2, 1, 31};
+                    plan[cnt++] = {3, 2, 2, 32 - k};
+                    plan[cnt++] = {0, 3, 1, 2};
+                    plan[cnt++] = {3, 3, 3, k};
+                    plan[cnt++] = {2, 3, 3, k};
+                }
+                plan[cnt++] = {1, 3, 1, 3};
+            } else {
+                auto calc_magic = [](int d) -> std::pair<int, int> {
+                    int p = 31;
+                    unsigned int ad = (d < 0) ? (0u - static_cast<unsigned int>(d)) : static_cast<unsigned int>(d);
+                    unsigned int t = 0x80000000u + (static_cast<unsigned int>(d) >> 31);
+                    unsigned int anc = t - 1 - t % ad;
+                    unsigned int q1 = 0x80000000u / anc, r1 = 0x80000000u - q1 * anc;
+                    unsigned int q2 = 0x80000000u / ad,  r2 = 0x80000000u - q2 * ad;
+                    unsigned int delta;
+                    do {
+                        ++p;
+                        q1 <<= 1; r1 <<= 1;
+                        if (r1 >= anc) { ++q1; r1 -= anc; }
+                        q2 <<= 1; r2 <<= 1;
+                        if (r2 >= ad)  { ++q2; r2 -= ad;  }
+                        delta = ad - r2;
+                    } while (q1 < delta || (q1 == delta && r1 == 0));
+                    unsigned int mu = q2 + 1;
+                    if (d < 0) mu = 0u - mu;
+                    return {static_cast<int>(mu), p - 32};
+                };
+                auto [M, s] = calc_magic(value);
+                plan[cnt++] = {5, 2, M, 0};
+                plan[cnt++] = {6, 3, 1, 2};
+                if (value > 0 && M < 0) {
+                    plan[cnt++] = {0, 3, 3, 1};
+                } else if (value < 0 && M > 0) {
+                    plan[cnt++] = {1, 3, 3, 1};
+                }
+                if (s > 0) {
+                    plan[cnt++] = {4, 3, 3, s};
+                }
+                plan[cnt++] = {3, 2, 3, 31};
+                plan[cnt++] = {0, 3, 3, 2};
+                plan[cnt++] = {5, 2, value, 0};
+                plan[cnt++] = {7, 3, 3, 2};
+                plan[cnt++] = {1, 3, 1, 3};
+            }
+        }
+    }
+    const char* regs[] = {"zero", r_in.c_str(), "t5", "t6"};
+    for (int i = 0; i < cnt; ++i) {
+        auto [op, dst, s1, s2] = plan[i];
+        std::string out_reg = (i == cnt - 1 && dst_in_phys) ? rd : regs[dst];
+        if (op == 0) {
+            debug_insts.push_back({"addw", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 1) {
+            debug_insts.push_back({"subw", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 2) {
+            debug_insts.push_back({"slliw", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 3) {
+            debug_insts.push_back({"srliw", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 4) {
+            debug_insts.push_back({"srai", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 5) {
+            debug_insts.push_back({"li", out_reg, "", "", s1, ""});
+        } else if (op == 6) {
+            debug_insts.push_back({"mul", regs[dst], regs[s1], regs[s2], 0, ""});
+            debug_insts.push_back({"srai", out_reg, regs[dst], "", 32, ""});
+        } else if (op == 7) {
+            debug_insts.push_back({"mulw", out_reg, regs[s1], regs[s2], 0, ""});
+        } else if (op == 8) {
+            debug_insts.push_back({"andi", out_reg, regs[s1], "", s2, ""});
+        } else if (op == 9) {
+            debug_insts.push_back({"remw", out_reg, regs[s1], regs[s2], 0, ""});
+        }
+    }
+    if (!dst_in_phys) {
+        debug_insts.push_back({"sext.w", "t5", "t6", "", 0, ""});
+        commit_dst(dst_vreg, "t5");
     }
 }

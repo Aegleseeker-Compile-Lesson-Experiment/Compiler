@@ -43,6 +43,9 @@ public:
     std::string def_operand(const std::string& dst, const std::string& scratch);
     void commit_dst(const std::string& dst, const std::string& scratch);
     void emit_parallel_moves(const std::vector<std::pair<std::string, std::string>>& moves);
+    void debug_gen_mul(const std::string& dst_vreg, const std::string& var_op, int value);
+    void debug_gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided);
+    void debug_gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided);
 };
 
 #endif // !CODEGEN_H
