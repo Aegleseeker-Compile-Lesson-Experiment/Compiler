@@ -144,14 +144,14 @@ std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> pa
     std::vector<int> call_indices;
     int cur_idx = 0;
     for (int b = 0; b < N; ++b) {
-        block_start[b] = cur_idx;
+        block_start[b] = 2 * cur_idx;
         for (const auto& inst : blocks[b].insts) {
             if (inst.op == IROp::CALL) {
-                call_indices.push_back(cur_idx);
+                call_indices.push_back(2 * cur_idx);
             }
             cur_idx++;
         }
-        block_end[b] = (cur_idx > block_start[b]) ? (cur_idx - 1) : block_start[b];
+        block_end[b] = (2 * cur_idx > block_start[b]) ? (2 * cur_idx - 1) : block_start[b];
     }
     auto live_out = live_inout();
     auto intervals = construct_intervals(params, block_start, block_end, call_indices, live_out);
@@ -462,27 +462,30 @@ std::vector<LiveInterval> IRGenerator::construct_intervals(const std::vector<std
         for (const auto& v : live_out[b]) {
             add_range(v, block_start[b], block_end[b]);
         }
-        int idx = block_end[b];
-        for (int i = static_cast<int>(blocks[b].insts.size()) - 1; i >= 0; --i, --idx) {
+        int inst_idx = (block_end[b] - 1) / 2;
+        for (int i = static_cast<int>(blocks[b].insts.size()) - 1; i >= 0; --i, --inst_idx) {
             const auto& inst = blocks[b].insts[i];
+            int use_pos = 2 * inst_idx;
+            int def_pos = 2 * inst_idx + 1;
             for (const auto& d : get_defs(inst)) {
                 auto& iv = interval_map[d];
                 iv.reg = d;
-                if (iv.end == -1) iv.end = idx;
+                if (iv.end == -1) iv.end = def_pos;
                 if (iv.start == block_start[b]) {
-                    iv.start = idx;
+                    iv.start = def_pos;
                 } else {
-                    iv.start = std::min(iv.start, idx);
+                    iv.start = std::min(iv.start, def_pos);
                 }
             }
             for (const auto& u : get_uses(inst)) {
-                add_range(u, block_start[b], idx);
+                add_range(u, block_start[b], use_pos);
             }
         }
     }
-    for (const auto& param : params) {
+    for (auto param : params) {
+        if (!param.empty() && param[0] != '%') param = "%" + param;
         if (interval_map.count(param)) {
-            interval_map[param].start = 0;
+            interval_map[param].start = -1;
         }
     }
     std::vector<LiveInterval> intervals;

@@ -16,7 +16,7 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     // cg_file << cg.generate(functions_ir);
     // cg_file.close();
     if (gen_code) {
-        std::cout << cg.generate(/* functions_ir */);
+        std::cout << cg.generate(functions_ir);
     }
     return err_msg;
 }
@@ -542,6 +542,7 @@ std::string Sementiser::dfs_logical_op(ASTNode *node, Block *block) {
     bool is_and = (node->text == "&&");
     auto res_ptr = "%sc.addr_" + std::to_string(ir.reg_id++);
     ir.entry_allocas << "  " << res_ptr << " = alloca i32\n";
+    ir.entry_allocas_insts.push_back({IROp::ALLOCA, res_ptr, "", "", {}, {}});
     auto rhs_label = ir.new_label();
     auto end_label = ir.new_label();
     auto lhs = dfs_op(node->children[0], block);

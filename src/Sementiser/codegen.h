@@ -23,7 +23,7 @@ private:
     void emit_jmp(const std::string& label);
     void load_operand(const std::string& op, const std::string& reg);
 public:
-    std::string generate(/* const std::vector<IRFunc>& funcs */);
+    std::string generate(const std::vector<IRFunc>& funcs);
     void serialize_asm();
     void gen_func(const IRFunc& fn);
     void gen_inst(const IRInst& inst);

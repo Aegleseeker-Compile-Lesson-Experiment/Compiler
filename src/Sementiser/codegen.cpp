@@ -44,7 +44,7 @@ void CodeGen::load_operand(const std::string& op, const std::string& reg) {
     }
 }
 
-std::string CodeGen::generate(/* const std::vector<IRFunc>& funcs */) {
+std::string CodeGen::generate(const std::vector<IRFunc>& funcs) {
     asm_out.str("");
     asm_out << "  .text\n";
     asm_out << "  .globl _start\n";
@@ -925,7 +925,15 @@ void CodeGen::debug_emit_sw(const std::string& rs, int offset) {
 }
 
 void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& func) {
-    int raw_size = 16 + 8 * static_cast<int>(alloc.used_callee_regs.size()) + alloc.spill_bytes;
+    int max_stack_args = 0;
+    for (const auto& blk : blocks) {
+        for (const auto& inst : blk.insts) {
+            if (inst.op == IROp::CALL && inst.args.size() > 8) {
+                max_stack_args = std::max(max_stack_args, static_cast<int>(inst.args.size()) - 8);
+            }
+        }
+    }
+    int raw_size = 16 + 8 * static_cast<int>(alloc.used_callee_regs.size()) + alloc.spill_bytes + 8 * max_stack_args;
     int frame_size = (raw_size + 15) & ~15;
     std::string epilogue_label = "Lret_" + func.name;
     debug_insts.push_back(AsmInst{ "globl", "", "", "", 0, func.name });
@@ -984,6 +992,17 @@ void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& f
             for (auto& mv : reg_param_moves) {
                 if (mv.second == cycle_reg) mv.second = "t5";
             }
+        }
+    }
+    for (size_t i = 8; i < func.params.size(); ++i) {
+        std::string p = func.params[i];
+        if (!p.empty() && p[0] != '%') p = "%" + p;
+        int caller_stack_off = static_cast<int>(i - 8) * 8;
+        if (alloc.reg_map.count(p)) {
+            debug_emit_lw(alloc.reg_map[p], caller_stack_off);
+        } else if (alloc.spill_slot.count(p)) {
+            debug_emit_lw("t5", caller_stack_off);
+            debug_emit_sw("t5", alloc.spill_slot[p]);
         }
     }
     std::unordered_map<std::string, int> vreg_uses;
@@ -1100,6 +1119,17 @@ void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& f
                     break;
                 }
                 case IROp::CALL: {
+                    for (size_t k = 8; k < inst.args.size(); ++k) {
+                        std::string val_reg = use_operand(inst.args[k], "t5");
+                        int sp_offset = static_cast<int>(k - 8) * 8;
+                        if (sp_offset <= 2047) {
+                            debug_insts.push_back({"sw", "", "sp", val_reg, sp_offset, ""});
+                        } else {
+                            debug_insts.push_back({"li", "t6", "", "", sp_offset, ""});
+                            debug_insts.push_back({"add", "t6", "sp", "t6", 0, ""});
+                            debug_insts.push_back({"sw", "", "t6", val_reg, 0, ""});
+                        }
+                    }
                     std::vector<std::pair<std::string, std::string>> arg_moves;
                     for (size_t k = 0; k < inst.args.size() && k < 8; ++k) {
                         arg_moves.push_back({"a" + std::to_string(k), inst.args[k]});
@@ -1112,7 +1142,7 @@ void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& f
                                 debug_insts.push_back({"mv", alloc.reg_map[inst.dst], "a0", "", 0, ""});
                             }
                         } else if (alloc.spill_slot.count(inst.dst)) {
-                            emit_sw("a0", alloc.spill_slot[inst.dst]);
+                            debug_emit_sw("a0", alloc.spill_slot[inst.dst]);
                         }
                     }
                     break;
@@ -1126,7 +1156,7 @@ void CodeGen::debug_generate(const std::vector<IRBlock>& blocks, const IRFunc& f
                                 debug_insts.push_back({"mv", "a0", alloc.reg_map[inst.src1], "", 0, ""});
                             }
                         } else {
-                            emit_lw("a0", alloc.spill_slot[inst.src1]);
+                            debug_emit_lw("a0", alloc.spill_slot[inst.src1]);
                         }
                     }
                     debug_insts.push_back({"j", "", "", "", 0, "." + func.name + "_" + epilogue_label});
@@ -1162,7 +1192,7 @@ std::string CodeGen::use_operand(const std::string& op, const std::string& scrat
     if (alloc.reg_map.count(op)) {
         return alloc.reg_map[op];
     }
-    emit_lw(scratch, alloc.spill_slot[op]);
+    debug_emit_lw(scratch, alloc.spill_slot[op]);
     return scratch;
 }
 
@@ -1175,7 +1205,7 @@ std::string CodeGen::def_operand(const std::string& dst, const std::string& scra
 
 void CodeGen::commit_dst(const std::string& dst, const std::string& scratch) {
     if (!alloc.reg_map.count(dst)) {
-        emit_sw(scratch, alloc.spill_slot[dst]);
+        debug_emit_sw(scratch, alloc.spill_slot[dst]);
     }
 }
 
@@ -1224,7 +1254,7 @@ void CodeGen::emit_parallel_moves(const std::vector<std::pair<std::string, std::
         if (task.raw_src[0] != '%') {
             debug_insts.push_back({"li", task.dst_reg, "", "", std::stoi(task.raw_src), ""});
         } else {
-            emit_lw(task.dst_reg, alloc.spill_slot[task.raw_src]);
+            debug_emit_lw(task.dst_reg, alloc.spill_slot[task.raw_src]);
         }
     }
 }
