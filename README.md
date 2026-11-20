@@ -118,3 +118,65 @@ Compiler/
 
 
 `czy` 分支：
+
+
+
+## 运行说明
+
+以下操作基于 `Ubuntu 26.04 LTS`，可以完全展示本项目的功能。
+
+---
+
+**环境构建**
+
+```shell
+sudo apt update
+sudo apt install -y ca-certificates curl git build-essential cmake unzip xz-utils file python3 qemu-user qemu-system-misc qemu-utils gdb-multiarch gcc-riscv64-unknown-elf u-boot-qemu
+```
+
+```shell
+git config --global user.name "Your name"
+git config --global user.email "Your email"
+```
+
+---
+
+**项目部署**
+
+获取本项目，这里选择 `main` 分支：
+
+```shell
+git clone https://github.com/Aegleseeker-Compile-Lesson-Experiment/Compiler.git
+```
+
+在项目根目录执行全量编译：
+
+```shell
+make
+```
+
+---
+
+**基本功能**
+
+假设 `test.c` 是待编译源文件，`test` 是可执行文件，`test.in` 是可执行文件的输入，`test.out` 是可执行文件的输出，`test.s` 是生成的汇编，`output.ll` 是生成的 `LLVMIR`。
+
+```shell
+./compiler -token < test.c                   # 词法分析
+./compiler -ast < test.c                     # 语法 & 语义分析, 并生成 LLAR(1) 文法图文本文件
+./compiler -asm < test.c > test.s            # 生成 RISC-V 汇编
+./compiler -asm -opt < test.c > test.s       # 与上述等价
+riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d -nostdlib -static test.s third_party/toyc/libtoyc.a -o test           # 生成 test
+qemu-riscv64 ./test < test.in > test.out     # 运行可执行文件
+```
+
+---
+
+**额外功能**
+
+下面的指令可以生成 LALR(1) 分析法对 toyC 分析生成的语法分析图。
+
+```shell
+sudo apt install graphviz
+dot -Tsvg ./third_party/dots/lalr_dfa.dot -o ./lalr_dfa.svg
+```
