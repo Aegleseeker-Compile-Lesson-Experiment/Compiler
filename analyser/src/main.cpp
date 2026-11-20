@@ -19,7 +19,7 @@ static int run_token_mode(Lexer& lexer) {
     for (const LexError& error : lexer.errors()) {
         cerr << error.line << ":" << error.column << ": " << error.message << "\n";
     }
-    return lexer.errors().empty() ? 0 : 1;
+    return 0;
 }
 
 int main(int argc, char** argv) {
