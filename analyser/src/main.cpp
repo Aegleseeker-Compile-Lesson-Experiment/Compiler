@@ -11,13 +11,18 @@ using namespace std;
 // -token：把 Token 流按评测格式打印出来
 static int run_token_mode(Lexer& lexer) {
     vector<Token> tokens = lexer.tokenize();
+    const vector<LexError>& errors = lexer.errors();
+    if (!errors.empty()) {
+        cout << "reject\n";
+        for (const LexError& error : errors) {
+            cout << error.line << " " << error.message << "\n";
+        }
+        cout << "\n";
+    }
     int index = 0;
     for (const Token& token : tokens) {
         if (token.kind == TokenKind::EndOfFile) break;
         cout << index++ << ":" << format_token(token) << "\n";
-    }
-    for (const LexError& error : lexer.errors()) {
-        cerr << error.line << ":" << error.column << ": " << error.message << "\n";
     }
     return 0;
 }

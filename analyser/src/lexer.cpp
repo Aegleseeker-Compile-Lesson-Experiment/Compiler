@@ -187,7 +187,7 @@ Token Lexer::next_token() {
 
         // 非法字符：记录错误，跳过后继续扫描
         errors_.push_back({start_line, start_column,
-                           string("unexpected character '") + c + "'"});
+                           "illegal character '" + string(1, c) + "'"});
         advance();
     }
 }
