@@ -50,7 +50,7 @@ Aegleseeker-Compiler（[GitHub - Aegleseeker-Compile-Lesson-Experiment/Compiler 
 
 
 $$
-\mathcal{Aegleseeker}
+𝓐𝓮𝓰𝓵𝓮𝓼𝓮𝓮𝓴𝓮𝓻
 $$
 
 
