@@ -1,43 +1,67 @@
-#include <cstdio>
-int getint() {
-    int x;
-    scanf("%d", &x);
-    return x;
-}
-void putint(int x) {
-    printf("%d\n", x);
-}
-int dead_code(int limit, int input_seed, int input_state) {
-    int x = input_seed;
-    int state = input_state;
-    int i = 0;
-    while (i < limit) {
-        x = (x * 17 + 23) % 4096;
-        int unused1 = x * x + x * 13;
-        int unused2 = unused1 / 7 + 91;
-        if (0) {
-            state = state + unused2;
-        }
-        int j = 0;
-        while (j < 8) {
-            int unused3 = x * 3 + j * j;
-            j = j + 1;
-        }
-        state = (state * 5 + x + i % 128) % 8192;
-        i = i + 1;
+#include "scanner.h"
+
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <string>
+
+namespace {
+
+std::string quoted(const std::string& text) {
+    std::string output = "\"";
+    for (char c : text) {
+        if (c == '\\' || c == '"') output += '\\';
+        output += c;
     }
-    return state * 4096 + x;
+    return output + '"';
 }
 
-int main() {
-    int limit = getint();
-    int input_seed = getint();
-    int input_state = getint();
-    if (limit < 1 || limit > 150000000 || input_seed < 0 || input_seed > 4095 || input_state < 0 || input_state > 8191) {
-        putint(-1);
-        return 1;
+void print(const toy_lex::Result& result) {
+    if (!result.errors.empty()) {
+        std::cout << "reject\n";
+        for (const auto& error : result.errors)
+            std::cout << error.at.line - 1 << ' ' << error.at.column << ' '
+                      << error.description << '\n';
+        std::cout << '\n';
     }
-    int result = dead_code(limit, input_seed, input_state);
-    putint(result);
-    return result % 256;
+    for (std::size_t i = 0; i < result.tokens.size(); ++i) {
+        const auto& token = result.tokens[i];
+        std::string label;
+        switch (token.category) {
+            case toy_lex::Category::name: label = "Ident"; break;
+            case toy_lex::Category::integer: label = "IntConst"; break;
+            case toy_lex::Category::keyword:
+            case toy_lex::Category::punctuation: label = "'" + token.text + "'"; break;
+        }
+        std::cout << i << ':' << label << ':' << quoted(token.text) << '\n';
+    }
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    if (argc > 2 || (argc == 2 && std::string(argv[1]) == "--help")) {
+        std::cout << "Usage: complier [-token | source.c]\n"
+                     "With no argument or -token, reads standard input.\n";
+        return argc > 2 ? 2 : 0;
+    }
+    std::ifstream file;
+    std::istream* input = &std::cin;
+    if (argc == 2 && std::string(argv[1]) != "-token") {
+        file.open(argv[1], std::ios::binary);
+        if (!file) {
+            std::cerr << "Cannot open input file: " << argv[1] << '\n';
+            return 2;
+        }
+        input = &file;
+    }
+    const std::string source(std::istreambuf_iterator<char>{*input},
+                             std::istreambuf_iterator<char>{});
+    if (!*input && !input->eof()) {
+        std::cerr << "Cannot read input\n";
+        return 2;
+    }
+    toy_lex::Scanner scanner(source);
+    print(scanner.run());
+    return 0;
 }
