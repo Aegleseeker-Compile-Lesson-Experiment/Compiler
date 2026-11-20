@@ -29,6 +29,25 @@ bool is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
+// 返回位置 pos 处一个 UTF-8 字符占用的字节数；非法字节序列按 1 字节处理
+size_t utf8_length(const string& s, size_t pos) {
+    unsigned char lead = static_cast<unsigned char>(s[pos]);
+    size_t len = 1;
+    if (lead >= 0xC2 && lead <= 0xDF) {
+        len = 2;
+    } else if (lead >= 0xE0 && lead <= 0xEF) {
+        len = 3;
+    } else if (lead >= 0xF0 && lead <= 0xF4) {
+        len = 4;
+    }
+    if (pos + len > s.size()) return 1;
+    for (size_t i = 1; i < len; ++i) {
+        unsigned char next = static_cast<unsigned char>(s[pos + i]);
+        if (next < 0x80 || next > 0xBF) return 1;
+    }
+    return len;
+}
+
 TokenKind keyword_kind(const string& text) {
     if (text == "int")      return TokenKind::KwInt;
     if (text == "void")     return TokenKind::KwVoid;
@@ -185,10 +204,13 @@ Token Lexer::next_token() {
             return Token{kind, string(1, c), start_line, start_column};
         }
 
-        // 非法字符：记录错误，跳过后继续扫描
+        // 非法字符：非 ASCII 字符整体按一个字符报告，其余按单字符报告
+        size_t length = static_cast<unsigned char>(c) >= 0x80
+                            ? utf8_length(source_, pos_)
+                            : 1;
         errors_.push_back({start_line, start_column,
-                           "illegal character '" + string(1, c) + "'"});
-        advance();
+                           "illegal character '" + source_.substr(pos_, length) + "'"});
+        for (size_t i = 0; i < length; ++i) advance();
     }
 }
 
