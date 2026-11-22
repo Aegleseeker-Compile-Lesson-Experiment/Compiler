@@ -29,6 +29,7 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
         auto idom = ir.mem2reg();
         run_cse(ir.blocks, idom);
         run_licm(ir.blocks, idom);
+        run_cse(ir.blocks, idom);
         ir.split_critical_edges();
         ir.eliminate_phis();
         auto intervals = ir.build_live_intervals(ir_fn.params, ir.blocks);
