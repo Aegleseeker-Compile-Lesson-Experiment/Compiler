@@ -613,9 +613,6 @@ void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom) {
         switch (op) {
             case IROp::ADD: case IROp::SUB: case IROp::MUL:
             case IROp::SDIV: case IROp::SREM:
-            case IROp::ICMP_EQ: case IROp::ICMP_NE:
-            case IROp::ICMP_SLT: case IROp::ICMP_SGT:
-            case IROp::ICMP_SLE: case IROp::ICMP_SGE:
                 return true;
             default:
                 return false;
