@@ -471,8 +471,6 @@ void run_licm(std::vector<IRBlock> blocks, std::vector<int>& idom) {
     }
 }
 
-
-
 void inline_functions(std::vector<IRFunc>& funcs) {
     int inline_id = 0;
     bool changed = true;
@@ -487,7 +485,21 @@ void inline_functions(std::vector<IRFunc>& funcs) {
                     break;
                 }
             }
-            if (is_leaf) {
+            std::unordered_set<std::string> seen_labels;
+            bool has_loop = false;
+            for (const auto& inst : fn.insts) {
+                if (inst.op == IROp::LABEL) {
+                    seen_labels.insert(inst.dst);
+                } else if (inst.op == IROp::JMP && seen_labels.count(inst.dst)) {
+                    has_loop = true;
+                    break;
+                } else if (inst.op == IROp::BR_COND &&
+                        (seen_labels.count(inst.dst) || seen_labels.count(inst.src2))) {
+                    has_loop = true;
+                    break;
+                }
+            }
+            if (is_leaf && !has_loop) {
                 leaf_map[fn.name] = fn;
             }
         }
