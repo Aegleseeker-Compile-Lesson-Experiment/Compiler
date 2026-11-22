@@ -727,3 +727,71 @@ void IRGenerator::run_licm(std::vector<int>& idom) {
         p_insts.insert(pos, hoisted.begin(), hoisted.end());
     }
 }
+
+void IRGenerator::eliminate_tail_recursion(IRFunc& fn) {
+    bool has_tail_call = false;
+    for (size_t i = 0; i + 1 < fn.insts.size(); ++i) {
+        const auto& c = fn.insts[i];
+        const auto& r = fn.insts[i + 1];
+        if (c.op == IROp::CALL && c.src1 == fn.name && r.op == IROp::RET && c.dst == r.src1) {
+            has_tail_call = true;
+            break;
+        }
+    }
+    if (!has_tail_call) return;
+    std::unordered_set<std::string> alloca_set;
+    std::unordered_map<std::string, std::string> param_to_slot;
+    size_t body_start = 0;
+    for (size_t i = 0; i < fn.insts.size(); ++i) {
+        const auto& inst = fn.insts[i];
+        if (inst.op == IROp::ALLOCA) {
+            alloca_set.insert(inst.dst);
+            body_start = i + 1;
+        } else if (inst.op == IROp::STORE && alloca_set.count(inst.src2)) {
+            param_to_slot[inst.src1] = inst.src2;
+            body_start = i + 1;
+        } else {
+            break;
+        }
+    }
+    std::vector<std::string> param_slots(fn.params.size());
+    std::vector<IRInst> extra_allocas;
+    std::vector<IRInst> extra_init_stores;
+    for (size_t k = 0; k < fn.params.size(); ++k) {
+        std::string p = fn.params[k];
+        if (!p.empty() && p[0] != '%') p = "%" + p;
+        if (param_to_slot.count(p)) {
+            param_slots[k] = param_to_slot[p];
+        } else {
+            std::string slot = "%tre_param_" + std::to_string(k);
+            param_slots[k] = slot;
+            extra_allocas.push_back({IROp::ALLOCA, slot, "", "", {}, {}});
+            extra_init_stores.push_back({IROp::STORE, "", p, slot, {}, {}});
+        }
+    }
+    std::string header_label = "L_tre_header_" + fn.name;
+    std::vector<IRInst> new_insts;
+    new_insts.reserve(fn.insts.size() + 8);
+    new_insts.insert(new_insts.end(), extra_allocas.begin(), extra_allocas.end());
+    new_insts.insert(new_insts.end(), fn.insts.begin(), fn.insts.begin() + body_start);
+    new_insts.insert(new_insts.end(), extra_init_stores.begin(), extra_init_stores.end());
+    new_insts.push_back({IROp::JMP, header_label, "", "", {}, {}});
+    new_insts.push_back({IROp::LABEL, header_label, "", "", {}, {}});
+    for (size_t i = body_start; i < fn.insts.size(); ++i) {
+        if (i + 1 < fn.insts.size()) {
+            const auto& c = fn.insts[i];
+            const auto& r = fn.insts[i + 1];
+            if (c.op == IROp::CALL && c.src1 == fn.name && r.op == IROp::RET && c.dst == r.src1) {
+                for (size_t k = 0; k < param_slots.size() && k < c.args.size(); ++k) {
+                    new_insts.push_back({IROp::STORE, "", c.args[k], param_slots[k], {}, {}});
+                }
+                new_insts.push_back({IROp::JMP, header_label, "", "", {}, {}});
+                ++i;
+                continue;
+            }
+        }
+        new_insts.push_back(fn.insts[i]);
+    }
+
+    fn.insts = std::move(new_insts);
+}

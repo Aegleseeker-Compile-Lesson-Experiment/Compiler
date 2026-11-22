@@ -15,6 +15,9 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     // std::ofstream cg_file("test.s");
     // cg_file << cg.generate(functions_ir);
     // cg_file.close();
+    for (auto& ir_fn : functions_ir) {
+        ir.eliminate_tail_recursion(ir_fn);
+    }
     ir.inline_functions(functions_ir);
     for (const auto& ir_fn : functions_ir) {
         ir.blocks.clear();
