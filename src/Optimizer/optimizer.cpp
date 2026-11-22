@@ -51,6 +51,9 @@ void optimize_ir(std::vector<IRInst>& insts) {
             std::string target = (cond != 0) ? inst.dst : inst.src2;
             inst = {IROp::JMP, target, "", "", {}, {}};
         }
+        if (inst.op == IROp::MOV && is_int_literal(inst.src1)) {
+            const_map[inst.dst] = inst.src1;
+        }
     }
     bool cfg_changed = true;
     while (cfg_changed) {
@@ -115,7 +118,8 @@ void optimize_ir(std::vector<IRInst>& insts) {
                                 inst.op == IROp::MUL  || inst.op == IROp::SDIV || inst.op == IROp::SREM ||
                                 inst.op == IROp::ICMP_EQ || inst.op == IROp::ICMP_NE ||
                                 inst.op == IROp::ICMP_SLT || inst.op == IROp::ICMP_SGT ||
-                                inst.op == IROp::ICMP_SLE || inst.op == IROp::ICMP_SGE);
+                                inst.op == IROp::ICMP_SLE || inst.op == IROp::ICMP_SGE ||
+                                inst.op == IROp::MOV);
                 if (is_pure && use_cnt[inst.dst] == 0) {
                     changed = true;
                     continue;
