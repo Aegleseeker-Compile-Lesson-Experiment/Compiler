@@ -116,7 +116,7 @@ std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> pa
     auto _ = cooper();
     auto DF = _.first;
     auto idom = _.second;
-    run_licm(idom);
+    // run_licm(idom);
     std::vector<std::string> alloca_vars;
     std::unordered_set<std::string> alloca_set;
     for (const auto& inst : blocks[0].insts) {
