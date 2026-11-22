@@ -1,4 +1,4 @@
-#include "tokernizer.h"
+#include "tokenizer.h"
 #include "../Analyser/init.h"
 
 Tokenizer::Tokenizer() {

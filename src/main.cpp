@@ -1,7 +1,7 @@
 #include <cstdio>
 #include <string>
 
-#include "Tokenizer/tokernizer.h"
+#include "Tokenizer/tokenizer.h"
 #include "Analyser/analyser.h"
 #include "Sementiser/sementiser.h"
 

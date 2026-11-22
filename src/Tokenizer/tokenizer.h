@@ -1,0 +1,48 @@
+#ifndef TOKENIZER_H
+#define TOKENIZER_H
+
+#include <iostream>
+#include <string>
+#include <queue>
+#include <set>
+
+const std::string KEYWORD[] = {"void", "return", "int", "const", "while", "if", "else", "break", "continue"};
+const std::string SYMBOL[] = {"+", "-", "*", "/", "%", "=", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "!", "(", ")", "{", "}", ";", ","};
+enum class TokenType {
+    KEYWORD,
+    SYMBOL,
+    IDENTIFIER,
+    CONSTANT,
+    STRING_LITERAL,
+    SP_EOF
+};
+struct Token {
+    TokenType type;
+    std::string lexeme;
+    std::string symbol;
+    int line;
+    int column;
+    int value; // Value if constant else 0.
+};
+
+class Tokenizer {
+private:
+    std::queue<Token> tokens;
+    std::set<std::string> keyword;
+    std::set<std::string> symbol;
+public:
+    std::vector<std::pair<int, std::string>> ill_symbol;
+    Tokenizer();
+    bool is_keyword(const std::string &s);
+    bool is_symbol(const std::string &s);
+    bool is_constant(const std::string &s);
+    bool is_identifier(const std::string &s);
+    void catch_token(std::string &s, const int line, const int column);
+    std::string getNext();
+    void print();
+    void print_to_sentence();
+    inline int get_utf8_char_len(unsigned char lead);
+    void report_illegal_sequence(int line, const std::string& invalid_chunk);
+};
+
+#endif // TOKENIZER_H

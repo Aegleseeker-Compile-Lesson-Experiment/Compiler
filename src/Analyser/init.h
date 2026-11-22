@@ -11,7 +11,7 @@
 #define ANSI_CYAN   "\033[36m"
 #define ANSI_RESET  "\033[0m"
 
-#include "../Tokenizer/tokernizer.h"
+#include "../Tokenizer/tokenizer.h"
 #include "tools.h"
 
 #include <iostream>
