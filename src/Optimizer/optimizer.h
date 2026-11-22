@@ -14,5 +14,6 @@ void optimize_cg(std::vector<AsmInst>& insts);
 void eliminate_tail_recursion(IRFunc& fn);
 void run_licm(std::vector<IRBlock> blocks, std::vector<int>& idom);
 void inline_functions(std::vector<IRFunc>& funcs);
+void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom);
 
 #endif //!OPTIMIZER_H

@@ -584,3 +584,110 @@ void inline_functions(std::vector<IRFunc>& funcs) {
         }
     }
 }
+
+void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom) {
+    int N = static_cast<int>(blocks.size());
+    std::vector<std::vector<int>> dom_children(N);
+    for (int b = 1; b < N; ++b) {
+        if (blocks[b].used && idom[b] >= 0 && idom[b] < N) {
+            dom_children[idom[b]].push_back(b);
+        }
+    }
+    struct ExprKey {
+        IROp op;
+        std::string s1;
+        std::string s2;
+        bool operator==(const ExprKey& o) const {
+            return op == o.op && s1 == o.s1 && s2 == o.s2;
+        }
+    };
+    struct ExprHash {
+        size_t operator()(const ExprKey& k) const {
+            size_t h1 = std::hash<int>{}(static_cast<int>(k.op));
+            size_t h2 = std::hash<std::string>{}(k.s1);
+            size_t h3 = std::hash<std::string>{}(k.s2);
+            return h1 ^ (h2 * 1315423911u) ^ (h3 * 2654435761u);
+        }
+    };
+    auto is_cse_candidate = [](IROp op) -> bool {
+        switch (op) {
+            case IROp::ADD: case IROp::SUB: case IROp::MUL:
+            case IROp::SDIV: case IROp::SREM:
+            case IROp::ICMP_EQ: case IROp::ICMP_NE:
+            case IROp::ICMP_SLT: case IROp::ICMP_SGT:
+            case IROp::ICMP_SLE: case IROp::ICMP_SGE:
+                return true;
+            default:
+                return false;
+        }
+    };
+    std::unordered_map<ExprKey, std::string, ExprHash> expr_table;
+    std::unordered_map<std::string, std::string> alias;
+    auto resolve = [&](std::string& op) {
+        while (alias.count(op)) op = alias[op];
+    };
+    auto dfs_cse = [&](auto& self, int b) -> void {
+        if (!blocks[b].used) return;
+        std::vector<ExprKey> added_keys;
+        std::vector<IRInst> kept_insts;
+        kept_insts.reserve(blocks[b].insts.size());
+        for (auto& inst : blocks[b].insts) {
+            if (inst.op == IROp::PHI) {
+                for (auto& [lbl, val] : inst.phi_in) {
+                    resolve(val);
+                }
+                kept_insts.push_back(std::move(inst));
+                continue;
+            }
+            resolve(inst.src1);
+            resolve(inst.src2);
+            for (auto& arg : inst.args) {
+                resolve(arg);
+            }
+            if (is_cse_candidate(inst.op) && !inst.dst.empty() && inst.dst[0] == '%') {
+                std::string op1 = inst.src1;
+                std::string op2 = inst.src2;
+                if (inst.op == IROp::ADD || inst.op == IROp::MUL ||
+                    inst.op == IROp::ICMP_EQ || inst.op == IROp::ICMP_NE) {
+                    if (op1 > op2) std::swap(op1, op2);
+                }
+                ExprKey key{inst.op, op1, op2};
+                auto it = expr_table.find(key);
+                if (it != expr_table.end()) {
+                    alias[inst.dst] = it->second;
+                    continue;
+                } else {
+                    expr_table.emplace(key, inst.dst);
+                    added_keys.push_back(std::move(key));
+                }
+            }
+            kept_insts.push_back(std::move(inst));
+        }
+        blocks[b].insts = std::move(kept_insts);
+        for (int child : dom_children[b]) {
+            self(self, child);
+        }
+        for (const auto& k : added_keys) {
+            expr_table.erase(k);
+        }
+    };
+    dfs_cse(dfs_cse, 0);
+    if (!alias.empty()) {
+        for (auto& blk : blocks) {
+            if (!blk.used) continue;
+            for (auto& inst : blk.insts) {
+                if (inst.op == IROp::PHI) {
+                    for (auto& [lbl, val] : inst.phi_in) {
+                        resolve(val);
+                    }
+                } else {
+                    resolve(inst.src1);
+                    resolve(inst.src2);
+                    for (auto& arg : inst.args) {
+                        resolve(arg);
+                    }
+                }
+            }
+        }
+    }
+}
