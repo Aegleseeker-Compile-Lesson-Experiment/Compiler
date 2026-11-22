@@ -119,7 +119,22 @@ Compiler/
 
 `czy` 分支：
 
-
+```
+Compiler/
+├── analyser/                              # 词法分析器（独立 CMake 工程）
+│   ├── CMakeLists.txt
+│   └── src/
+│       ├── lexer.cpp / lexer.h            # 词法分析
+│       ├── main.cpp                       # 程序主入口
+│       ├── token.cpp / token.h            # Token 定义
+│       └── token_stream.h                 # Token 流
+├── third_party/                           # 第三方组件 & 自有组件
+│   └── toyc/
+│       └── libtoyc.a                      # 第三方函数
+├── LICENSE
+├── Makefile
+└── README.md                              # 本文件
+```
 
 ## 运行说明
 
