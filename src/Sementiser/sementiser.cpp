@@ -16,21 +16,26 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     // cg_file << cg.generate(functions_ir);
     // cg_file.close();
     for (auto& ir_fn : functions_ir) {
-        ir.eliminate_tail_recursion(ir_fn);
+        eliminate_tail_recursion(ir_fn);
+        optimize_ir(ir_fn.insts);
     }
-    ir.inline_functions(functions_ir);
+    inline_functions(functions_ir);
     for (const auto& ir_fn : functions_ir) {
         ir.blocks.clear();
         ir.label_block.clear();
         ir.ssa_id = 0;
         ir.cur_block = 0;
         ir.construct_blocks(ir_fn);
-        auto intervals = ir.mem2reg(ir_fn.params);
-        cg.alloc = cg.linear_scan_allocate(intervals);
-        cg.debug_generate(ir.blocks, ir_fn);
+        auto idom = ir.mem2reg();
+        run_licm(ir.blocks, idom);
+        ir.split_critical_edges();
+        ir.eliminate_phis();
+        auto intervals = ir.build_live_intervals(ir_fn.params, ir.blocks);
+        cg.linear_scan_allocate(intervals);
+        cg.gen_func(ir.blocks, ir_fn);
     }
     if (gen_code) {
-        std::cout << cg.generate(functions_ir);
+        std::cout << cg.generate();
     }
     return err_msg;
 }
@@ -334,7 +339,6 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     full_func << "}\n\n";
     ir_fn.insts.insert(ir_fn.insts.end(), ir.entry_allocas_insts.begin(), ir.entry_allocas_insts.end());
     ir_fn.insts.insert(ir_fn.insts.end(), ir.body_insts.begin(), ir.body_insts.end());
-    optimize_ir(ir_fn.insts);
     functions_ir.push_back(ir_fn);
     return full_func.str();
 }

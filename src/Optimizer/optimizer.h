@@ -11,5 +11,8 @@
 bool is_int_literal(const std::string& s);
 void optimize_ir(std::vector<IRInst>& insts);
 void optimize_cg(std::vector<AsmInst>& insts);
+void eliminate_tail_recursion(IRFunc& fn);
+void run_licm(std::vector<IRBlock> blocks, std::vector<int>& idom);
+void inline_functions(std::vector<IRFunc>& funcs);
 
 #endif //!OPTIMIZER_H

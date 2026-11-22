@@ -106,8 +106,18 @@ void IRGenerator::construct_blocks(const IRFunc& func) {
     }
 }
 
-std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> params) {
-    dfs_block(0);
+std::vector<int> IRGenerator::mem2reg() {
+    auto dfs_block = [&](auto& self, int id) -> void {
+        if (blocks[id].used) {
+            return;
+        } else {
+            blocks[id].used = true;
+            for (const auto i : blocks[id].succs) {
+                self(self, i);
+            }
+        }
+    };
+    dfs_block(dfs_block, 0);
     for (auto &block : blocks) {
         if (!block.used && block.label != "main") {
             block = IRBlock("");
@@ -116,7 +126,6 @@ std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> pa
     auto _ = cooper();
     auto DF = _.first;
     auto idom = _.second;
-    // run_licm(idom);
     std::vector<std::string> alloca_vars;
     std::unordered_set<std::string> alloca_set;
     for (const auto& inst : blocks[0].insts) {
@@ -137,37 +146,7 @@ std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> pa
     }
     create_phi(DF, alloca_vars, def_blocks);
     rename_var(alloca_vars, idom);
-    split_critical_edges();
-    eliminate_phis();
-    int N = static_cast<int>(blocks.size());
-    std::vector<int> block_start(N, 0);
-    std::vector<int> block_end(N, -1);
-    std::vector<int> call_indices;
-    int cur_idx = 0;
-    for (int b = 0; b < N; ++b) {
-        block_start[b] = 2 * cur_idx;
-        for (const auto& inst : blocks[b].insts) {
-            if (inst.op == IROp::CALL) {
-                call_indices.push_back(2 * cur_idx);
-            }
-            cur_idx++;
-        }
-        block_end[b] = (2 * cur_idx > block_start[b]) ? (2 * cur_idx - 1) : block_start[b];
-    }
-    auto live_out = live_inout();
-    auto intervals = construct_intervals(params, block_start, block_end, call_indices, live_out);
-    return intervals;
-}
-
-void IRGenerator::dfs_block(int id) {
-    if (blocks[id].used) {
-        return;
-    } else {
-        blocks[id].used = true;
-        for (const auto i : blocks[id].succs) {
-            dfs_block(i);
-        }
-    }
+    return idom;
 }
 
 std::pair<std::vector<std::unordered_set<int>>, std::vector<int>> IRGenerator::cooper() {
@@ -236,6 +215,42 @@ std::pair<std::vector<std::unordered_set<int>>, std::vector<int>> IRGenerator::c
 }
 
 void IRGenerator::create_phi(std::vector<std::unordered_set<int>> &DF, std::vector<std::string> &alloca_vars, std::unordered_map<std::string, std::unordered_set<int>> &def_blocks) {
+    int N = static_cast<int>(blocks.size());
+    std::unordered_set<std::string> alloca_set(alloca_vars.begin(), alloca_vars.end());
+    std::vector<std::unordered_set<std::string>> upward_exposed(N), killed(N);
+    for (int b = 0; b < N; ++b) {
+        for (const auto& inst : blocks[b].insts) {
+            if (inst.op == IROp::LOAD && alloca_set.count(inst.src1)) {
+                if (!killed[b].count(inst.src1)) {
+                    upward_exposed[b].insert(inst.src1);
+                }
+            } else if (inst.op == IROp::STORE && alloca_set.count(inst.src2)) {
+                killed[b].insert(inst.src2);
+            }
+        }
+    }
+    std::vector<std::unordered_set<std::string>> live_in_alloca(N), live_out_alloca(N);
+    bool liveness_changed = true;
+    while (liveness_changed) {
+        liveness_changed = false;
+        for (int b = N - 1; b >= 0; --b) {
+            std::unordered_set<std::string> new_out;
+            for (int s : blocks[b].succs) {
+                new_out.insert(live_in_alloca[s].begin(), live_in_alloca[s].end());
+            }
+            std::unordered_set<std::string> new_in = upward_exposed[b];
+            for (const auto& var : new_out) {
+                if (!killed[b].count(var)) {
+                    new_in.insert(var);
+                }
+            }
+            if (new_out != live_out_alloca[b] || new_in != live_in_alloca[b]) {
+                live_out_alloca[b] = std::move(new_out);
+                live_in_alloca[b] = std::move(new_in);
+                liveness_changed = true;
+            }
+        }
+    }
     for (const auto& v : alloca_vars) {
         std::queue<int> worklist;
         std::unordered_set<int> has_phi, in_worklist;
@@ -248,11 +263,13 @@ void IRGenerator::create_phi(std::vector<std::unordered_set<int>> &DF, std::vect
             worklist.pop();
             for (int y : DF[b]) {
                 if (!has_phi.count(y)) {
-                    IRInst phi;
-                    phi.op = IROp::PHI;
-                    phi.dst = new_ssa_reg();
-                    phi.src1 = v;
-                    blocks[y].insts.insert(blocks[y].insts.begin(), phi);
+                    if (live_in_alloca[y].count(v)) {
+                        IRInst phi;
+                        phi.op = IROp::PHI;
+                        phi.dst = new_ssa_reg();
+                        phi.src1 = v;
+                        blocks[y].insts.insert(blocks[y].insts.begin(), phi);
+                    }
                     has_phi.insert(y);
                     if (!in_worklist.count(y)) {
                         worklist.push(y);
@@ -450,6 +467,27 @@ std::vector<std::unordered_set<std::string>> IRGenerator::live_inout() {
     return live_out;
 }
 
+std::vector<LiveInterval> IRGenerator::build_live_intervals(std::vector<std::string> params, std::vector<IRBlock> &blocks) {
+    int N = static_cast<int>(blocks.size());
+    std::vector<int> block_start(N, 0);
+    std::vector<int> block_end(N, -1);
+    std::vector<int> call_indices;
+    int cur_idx = 0;
+    for (int b = 0; b < N; ++b) {
+        block_start[b] = 2 * cur_idx;
+        for (const auto& inst : blocks[b].insts) {
+            if (inst.op == IROp::CALL) {
+                call_indices.push_back(2 * cur_idx);
+            }
+            cur_idx++;
+        }
+        block_end[b] = (2 * cur_idx > block_start[b]) ? (2 * cur_idx - 1) : block_start[b];
+    }
+    auto live_out = live_inout();
+    auto intervals = construct_intervals(params, block_start, block_end, call_indices, live_out);
+    return intervals;
+}
+
 std::vector<LiveInterval> IRGenerator::construct_intervals(const std::vector<std::string>& params, const std::vector<int>& block_start, const std::vector<int>& block_end, const std::vector<int>& call_indices, std::vector<std::unordered_set<std::string>> live_out) {
     auto N = static_cast<int>(blocks.size());
     std::unordered_map<std::string, LiveInterval> interval_map;
@@ -501,337 +539,4 @@ std::vector<LiveInterval> IRGenerator::construct_intervals(const std::vector<std
         intervals.push_back(std::move(iv));
     }
     return intervals;
-}
-
-void IRGenerator::inline_functions(std::vector<IRFunc>& funcs) {
-    int inline_id = 0;
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        std::unordered_map<std::string, IRFunc> leaf_map;
-        for (const auto& fn : funcs) {
-            bool is_leaf = true;
-            for (const auto& inst : fn.insts) {
-                if (inst.op == IROp::CALL) {
-                    is_leaf = false;
-                    break;
-                }
-            }
-            if (is_leaf && fn.insts.size() <= 50) {
-                leaf_map[fn.name] = fn;
-            }
-        }
-        if (leaf_map.empty()) break;
-        for (auto& caller : funcs) {
-            if (caller.insts.size() > 150) continue;
-            bool caller_changed = false;
-            std::vector<IRInst> hoisted_allocas;
-            std::vector<IRInst> new_insts;
-            for (const auto& call_inst : caller.insts) {
-                if (call_inst.op != IROp::CALL || call_inst.src1 == caller.name ||
-                    !leaf_map.count(call_inst.src1)) {
-                    new_insts.push_back(call_inst);
-                    continue;
-                }
-                caller_changed = true;
-                changed = true;
-                const auto& callee = leaf_map[call_inst.src1];
-                std::string suffix = ".inl_" + std::to_string(inline_id++);
-                int ret_cnt = 0;
-                for (const auto& inst : callee.insts) {
-                    if (inst.op == IROp::RET) ++ret_cnt;
-                }
-                bool single_tail_ret = (ret_cnt == 1 && !callee.insts.empty() && callee.insts.back().op == IROp::RET);
-                std::unordered_map<std::string, std::string> val_map;
-                for (size_t k = 0; k < callee.params.size() && k < call_inst.args.size(); ++k) {
-                    const std::string& p = callee.params[k];
-                    val_map[p] = call_inst.args[k];
-                    if (!p.empty() && p[0] != '%') val_map["%" + p] = call_inst.args[k];
-                    else if (p.size() > 1) val_map[p.substr(1)] = call_inst.args[k];
-                }
-                auto rename_val = [&](const std::string& v) -> std::string {
-                    if (v.empty()) return "";
-                    if (val_map.count(v)) return val_map[v];
-                    if (v[0] == '%') return v + suffix;
-                    return v;
-                };
-                auto rename_lbl = [&](const std::string& l) -> std::string {
-                    return l.empty() ? "" : (l + suffix);
-                };
-                if (single_tail_ret) {
-                    for (const auto& inst : callee.insts) {
-                        if (inst.op == IROp::ALLOCA) {
-                            hoisted_allocas.push_back({IROp::ALLOCA, rename_val(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::LABEL) {
-                            new_insts.push_back({IROp::LABEL, rename_lbl(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::JMP) {
-                            new_insts.push_back({IROp::JMP, rename_lbl(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::BR_COND) {
-                            new_insts.push_back({IROp::BR_COND, rename_lbl(inst.dst), rename_val(inst.src1), rename_lbl(inst.src2), {}, {}});
-                        } else if (inst.op == IROp::RET) {
-                            if (!call_inst.dst.empty() && !inst.src1.empty()) {
-                                new_insts.push_back({IROp::MOV, call_inst.dst, rename_val(inst.src1), "", {}, {}});
-                            }
-                        } else {
-                            new_insts.push_back({inst.op, rename_val(inst.dst), rename_val(inst.src1), rename_val(inst.src2), {}, {}});
-                        }
-                    }
-                } else {
-                    std::string exit_label = "L_inl_end" + suffix;
-                    std::string ret_ptr;
-                    if (!call_inst.dst.empty()) {
-                        ret_ptr = "%inl_ret" + suffix;
-                        hoisted_allocas.push_back({IROp::ALLOCA, ret_ptr, "", "", {}, {}});
-                    }
-                    for (const auto& inst : callee.insts) {
-                        if (inst.op == IROp::ALLOCA) {
-                            hoisted_allocas.push_back({IROp::ALLOCA, rename_val(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::LABEL) {
-                            new_insts.push_back({IROp::LABEL, rename_lbl(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::JMP) {
-                            new_insts.push_back({IROp::JMP, rename_lbl(inst.dst), "", "", {}, {}});
-                        } else if (inst.op == IROp::BR_COND) {
-                            new_insts.push_back({IROp::BR_COND, rename_lbl(inst.dst), rename_val(inst.src1), rename_lbl(inst.src2), {}, {}});
-                        } else if (inst.op == IROp::RET) {
-                            if (!ret_ptr.empty() && !inst.src1.empty()) {
-                                new_insts.push_back({IROp::STORE, "", rename_val(inst.src1), ret_ptr, {}, {}});
-                            }
-                            new_insts.push_back({IROp::JMP, exit_label, "", "", {}, {}});
-                        } else {
-                            new_insts.push_back({inst.op, rename_val(inst.dst), rename_val(inst.src1), rename_val(inst.src2), {}, {}});
-                        }
-                    }
-                    new_insts.push_back({IROp::LABEL, exit_label, "", "", {}, {}});
-                    if (!ret_ptr.empty()) {
-                        new_insts.push_back({IROp::LOAD, call_inst.dst, ret_ptr, "", {}, {}});
-                    }
-                }
-            }
-            if (caller_changed) {
-                if (!hoisted_allocas.empty()) {
-                    new_insts.insert(new_insts.begin(), hoisted_allocas.begin(), hoisted_allocas.end());
-                }
-                caller.insts = std::move(new_insts);
-            }
-        }
-    }
-}
-
-void IRGenerator::run_licm(std::vector<int>& idom) {
-    int N = static_cast<int>(blocks.size());
-    auto dominates = [&](int a, int b) -> bool {
-        if (a == b) return true;
-        int curr = b;
-        while (curr != 0 && curr != -1) {
-            if (curr == a) return true;
-            curr = idom[curr];
-        }
-        return curr == a;
-    };
-    struct NaturalLoop {
-        int header;
-        std::unordered_set<int> body;
-    };
-    std::vector<NaturalLoop> loops;
-    for (int u = 0; u < N; ++u) {
-        for (int h : blocks[u].succs) {
-            if (!dominates(h, u)) continue;
-            std::unordered_set<int> body = {h, u};
-            std::vector<int> worklist = {u};
-            while (!worklist.empty()) {
-                int curr = worklist.back();
-                worklist.pop_back();
-                if (curr == h) continue;
-                for (int p : blocks[curr].preds) {
-                    if (!body.count(p)) {
-                        body.insert(p);
-                        worklist.push_back(p);
-                    }
-                }
-            }
-            bool merged = false;
-            for (auto& lp : loops) {
-                if (lp.header == h) {
-                    lp.body.insert(body.begin(), body.end());
-                    merged = true;
-                    break;
-                }
-            }
-            if (!merged) loops.push_back({h, std::move(body)});
-        }
-    }
-    std::sort(loops.begin(), loops.end(), [](const NaturalLoop& a, const NaturalLoop& b) {
-        return a.body.size() < b.body.size();
-    });
-    auto is_pure_alu = [](const IRInst& inst) -> bool {
-        switch (inst.op) {
-            case IROp::ADD: case IROp::SUB: case IROp::MUL:
-            case IROp::ICMP_EQ: case IROp::ICMP_NE:
-            case IROp::ICMP_SLT: case IROp::ICMP_SGT:
-            case IROp::ICMP_SLE: case IROp::ICMP_SGE:
-                return true;
-            case IROp::SDIV: case IROp::SREM:
-                return !inst.src2.empty() && inst.src2[0] != '%' && std::stoll(inst.src2) != 0;
-            default:
-                return false;
-        }
-    };
-    int preheader_cnt = 0;
-    for (auto& lp : loops) {
-        int h = lp.header;
-        std::unordered_set<std::string> defined_in_loop;
-        for (int b : lp.body) {
-            for (const auto& inst : blocks[b].insts) {
-                if (!inst.dst.empty() && inst.dst[0] == '%' &&
-                    inst.op != IROp::JMP && inst.op != IROp::BR_COND && inst.op != IROp::LABEL) {
-                    defined_in_loop.insert(inst.dst);
-                }
-            }
-        }
-        std::vector<IRInst> hoisted;
-        std::unordered_set<std::string> hoisted_regs;
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (int b : lp.body) {
-                for (const auto& inst : blocks[b].insts) {
-                    if (hoisted_regs.count(inst.dst) || !is_pure_alu(inst)) continue;
-                    bool op1_inv = inst.src1.empty() || inst.src1[0] != '%' || !defined_in_loop.count(inst.src1);
-                    bool op2_inv = inst.src2.empty() || inst.src2[0] != '%' || !defined_in_loop.count(inst.src2);
-                    if (op1_inv && op2_inv) {
-                        hoisted.push_back(inst);
-                        hoisted_regs.insert(inst.dst);
-                        defined_in_loop.erase(inst.dst);
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if (hoisted.empty()) continue;
-        for (int b : lp.body) {
-            std::vector<IRInst> remain;
-            remain.reserve(blocks[b].insts.size());
-            for (auto& inst : blocks[b].insts) {
-                if (!hoisted_regs.count(inst.dst)) {
-                    remain.push_back(std::move(inst));
-                }
-            }
-            blocks[b].insts = std::move(remain);
-        }
-        std::vector<int> outside_preds;
-        for (int p : blocks[h].preds) {
-            if (!lp.body.count(p)) outside_preds.push_back(p);
-        }
-        int preheader = -1;
-        if (outside_preds.size() == 1 && blocks[outside_preds[0]].succs.size() == 1) {
-            preheader = outside_preds[0];
-        } else {
-            preheader = static_cast<int>(blocks.size());
-            std::string pre_lbl = ".Lpreheader_" + std::to_string(preheader_cnt++);
-            std::string h_lbl = blocks[h].label;
-            IRBlock pre_blk(pre_lbl);
-            pre_blk.insts.push_back({IROp::JMP, h_lbl, "", "", {}, {}});
-            pre_blk.preds = outside_preds;
-            pre_blk.succs = {h};
-            blocks.push_back(std::move(pre_blk));
-            idom.push_back(idom[h]);
-            idom[h] = preheader;
-            std::unordered_set<std::string> outside_labels;
-            for (int p : outside_preds) {
-                outside_labels.insert(blocks[p].label);
-                auto& term = blocks[p].insts.back();
-                if (term.op == IROp::JMP && term.dst == h_lbl) term.dst = pre_lbl;
-                if (term.op == IROp::BR_COND) {
-                    if (term.dst == h_lbl) term.dst = pre_lbl;
-                    if (term.src2 == h_lbl) term.src2 = pre_lbl;
-                }
-                for (int& s : blocks[p].succs) {
-                    if (s == h) { s = preheader; break; }
-                }
-            }
-            std::vector<int> new_h_preds = {preheader};
-            for (int p : blocks[h].preds) {
-                if (lp.body.count(p)) new_h_preds.push_back(p);
-            }
-            blocks[h].preds = std::move(new_h_preds);
-            for (auto& inst : blocks[h].insts) {
-                if (inst.op == IROp::PHI) {
-                    for (auto& [lbl, val] : inst.phi_in) {
-                        if (outside_labels.count(lbl)) lbl = pre_lbl;
-                    }
-                }
-            }
-        }
-        auto& p_insts = blocks[preheader].insts;
-        auto pos = p_insts.empty() ? p_insts.end() : (p_insts.end() - 1);
-        p_insts.insert(pos, hoisted.begin(), hoisted.end());
-    }
-}
-
-void IRGenerator::eliminate_tail_recursion(IRFunc& fn) {
-    bool has_tail_call = false;
-    for (size_t i = 0; i + 1 < fn.insts.size(); ++i) {
-        const auto& c = fn.insts[i];
-        const auto& r = fn.insts[i + 1];
-        if (c.op == IROp::CALL && c.src1 == fn.name && r.op == IROp::RET && c.dst == r.src1) {
-            has_tail_call = true;
-            break;
-        }
-    }
-    if (!has_tail_call) return;
-    std::unordered_set<std::string> alloca_set;
-    std::unordered_map<std::string, std::string> param_to_slot;
-    size_t body_start = 0;
-    for (size_t i = 0; i < fn.insts.size(); ++i) {
-        const auto& inst = fn.insts[i];
-        if (inst.op == IROp::ALLOCA) {
-            alloca_set.insert(inst.dst);
-            body_start = i + 1;
-        } else if (inst.op == IROp::STORE && alloca_set.count(inst.src2)) {
-            param_to_slot[inst.src1] = inst.src2;
-            body_start = i + 1;
-        } else {
-            break;
-        }
-    }
-    std::vector<std::string> param_slots(fn.params.size());
-    std::vector<IRInst> extra_allocas;
-    std::vector<IRInst> extra_init_stores;
-    for (size_t k = 0; k < fn.params.size(); ++k) {
-        std::string p = fn.params[k];
-        if (!p.empty() && p[0] != '%') p = "%" + p;
-        if (param_to_slot.count(p)) {
-            param_slots[k] = param_to_slot[p];
-        } else {
-            std::string slot = "%tre_param_" + std::to_string(k);
-            param_slots[k] = slot;
-            extra_allocas.push_back({IROp::ALLOCA, slot, "", "", {}, {}});
-            extra_init_stores.push_back({IROp::STORE, "", p, slot, {}, {}});
-        }
-    }
-    std::string header_label = "L_tre_header_" + fn.name;
-    std::vector<IRInst> new_insts;
-    new_insts.reserve(fn.insts.size() + 8);
-    new_insts.insert(new_insts.end(), extra_allocas.begin(), extra_allocas.end());
-    new_insts.insert(new_insts.end(), fn.insts.begin(), fn.insts.begin() + body_start);
-    new_insts.insert(new_insts.end(), extra_init_stores.begin(), extra_init_stores.end());
-    new_insts.push_back({IROp::JMP, header_label, "", "", {}, {}});
-    new_insts.push_back({IROp::LABEL, header_label, "", "", {}, {}});
-    for (size_t i = body_start; i < fn.insts.size(); ++i) {
-        if (i + 1 < fn.insts.size()) {
-            const auto& c = fn.insts[i];
-            const auto& r = fn.insts[i + 1];
-            if (c.op == IROp::CALL && c.src1 == fn.name && r.op == IROp::RET && c.dst == r.src1) {
-                for (size_t k = 0; k < param_slots.size() && k < c.args.size(); ++k) {
-                    new_insts.push_back({IROp::STORE, "", c.args[k], param_slots[k], {}, {}});
-                }
-                new_insts.push_back({IROp::JMP, header_label, "", "", {}, {}});
-                ++i;
-                continue;
-            }
-        }
-        new_insts.push_back(fn.insts[i]);
-    }
-
-    fn.insts = std::move(new_insts);
 }

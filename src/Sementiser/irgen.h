@@ -31,18 +31,15 @@ public:
     void emit_label(const std::string& label);
     int get_block(const std::string& label);
     void construct_blocks(const IRFunc& func);
-    std::vector<LiveInterval> mem2reg(const std::vector<std::string> params);
-    void dfs_block(int id);
+    std::vector<int> mem2reg();
     std::pair<std::vector<std::unordered_set<int>>, std::vector<int>> cooper();
     void create_phi(std::vector<std::unordered_set<int>> &DF, std::vector<std::string> &alloca_vars, std::unordered_map<std::string, std::unordered_set<int>> &def_blocks);
     void rename_var(std::vector<std::string> &alloca_vars, std::vector<int> &idom);
     void split_critical_edges();
     void eliminate_phis();
     std::vector<std::unordered_set<std::string>> live_inout();
+    std::vector<LiveInterval> build_live_intervals(std::vector<std::string> params, std::vector<IRBlock> &blocks);
     std::vector<LiveInterval> construct_intervals(const std::vector<std::string>& params, const std::vector<int>& block_start, const std::vector<int>& block_end, const std::vector<int>& call_indices, std::vector<std::unordered_set<std::string>> live_out);
-    void inline_functions(std::vector<IRFunc>& funcs);
-    void run_licm(std::vector<int>& idom);
-    void eliminate_tail_recursion(IRFunc& fn);
 };
 
 inline bool is_vreg(const std::string& s);
