@@ -116,6 +116,7 @@ std::vector<LiveInterval> IRGenerator::mem2reg(const std::vector<std::string> pa
     auto _ = cooper();
     auto DF = _.first;
     auto idom = _.second;
+    run_licm(idom);
     std::vector<std::string> alloca_vars;
     std::unordered_set<std::string> alloca_set;
     for (const auto& inst : blocks[0].insts) {
@@ -573,5 +574,156 @@ void IRGenerator::inline_functions(std::vector<IRFunc>& funcs) {
             new_insts.insert(new_insts.begin(), hoisted_allocas.begin(), hoisted_allocas.end());
         }
         caller.insts = std::move(new_insts);
+    }
+}
+
+void IRGenerator::run_licm(std::vector<int>& idom) {
+    int N = static_cast<int>(blocks.size());
+    auto dominates = [&](int a, int b) -> bool {
+        if (a == b) return true;
+        int curr = b;
+        while (curr != 0 && curr != -1) {
+            if (curr == a) return true;
+            curr = idom[curr];
+        }
+        return curr == a;
+    };
+    struct NaturalLoop {
+        int header;
+        std::unordered_set<int> body;
+    };
+    std::vector<NaturalLoop> loops;
+    for (int u = 0; u < N; ++u) {
+        for (int h : blocks[u].succs) {
+            if (!dominates(h, u)) continue;
+            std::unordered_set<int> body = {h, u};
+            std::vector<int> worklist = {u};
+            while (!worklist.empty()) {
+                int curr = worklist.back();
+                worklist.pop_back();
+                if (curr == h) continue;
+                for (int p : blocks[curr].preds) {
+                    if (!body.count(p)) {
+                        body.insert(p);
+                        worklist.push_back(p);
+                    }
+                }
+            }
+            bool merged = false;
+            for (auto& lp : loops) {
+                if (lp.header == h) {
+                    lp.body.insert(body.begin(), body.end());
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) loops.push_back({h, std::move(body)});
+        }
+    }
+    std::sort(loops.begin(), loops.end(), [](const NaturalLoop& a, const NaturalLoop& b) {
+        return a.body.size() < b.body.size();
+    });
+    auto is_pure_alu = [](const IRInst& inst) -> bool {
+        switch (inst.op) {
+            case IROp::ADD: case IROp::SUB: case IROp::MUL:
+            case IROp::ICMP_EQ: case IROp::ICMP_NE:
+            case IROp::ICMP_SLT: case IROp::ICMP_SGT:
+            case IROp::ICMP_SLE: case IROp::ICMP_SGE:
+                return true;
+            case IROp::SDIV: case IROp::SREM:
+                return !inst.src2.empty() && inst.src2[0] != '%' && std::stoll(inst.src2) != 0;
+            default:
+                return false;
+        }
+    };
+    int preheader_cnt = 0;
+    for (auto& lp : loops) {
+        int h = lp.header;
+        std::unordered_set<std::string> defined_in_loop;
+        for (int b : lp.body) {
+            for (const auto& inst : blocks[b].insts) {
+                if (!inst.dst.empty() && inst.dst[0] == '%' &&
+                    inst.op != IROp::JMP && inst.op != IROp::BR_COND && inst.op != IROp::LABEL) {
+                    defined_in_loop.insert(inst.dst);
+                }
+            }
+        }
+        std::vector<IRInst> hoisted;
+        std::unordered_set<std::string> hoisted_regs;
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (int b : lp.body) {
+                for (const auto& inst : blocks[b].insts) {
+                    if (hoisted_regs.count(inst.dst) || !is_pure_alu(inst)) continue;
+                    bool op1_inv = inst.src1.empty() || inst.src1[0] != '%' || !defined_in_loop.count(inst.src1);
+                    bool op2_inv = inst.src2.empty() || inst.src2[0] != '%' || !defined_in_loop.count(inst.src2);
+                    if (op1_inv && op2_inv) {
+                        hoisted.push_back(inst);
+                        hoisted_regs.insert(inst.dst);
+                        defined_in_loop.erase(inst.dst);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if (hoisted.empty()) continue;
+        for (int b : lp.body) {
+            std::vector<IRInst> remain;
+            remain.reserve(blocks[b].insts.size());
+            for (auto& inst : blocks[b].insts) {
+                if (!hoisted_regs.count(inst.dst)) {
+                    remain.push_back(std::move(inst));
+                }
+            }
+            blocks[b].insts = std::move(remain);
+        }
+        std::vector<int> outside_preds;
+        for (int p : blocks[h].preds) {
+            if (!lp.body.count(p)) outside_preds.push_back(p);
+        }
+        int preheader = -1;
+        if (outside_preds.size() == 1 && blocks[outside_preds[0]].succs.size() == 1) {
+            preheader = outside_preds[0];
+        } else {
+            preheader = static_cast<int>(blocks.size());
+            std::string pre_lbl = ".Lpreheader_" + std::to_string(preheader_cnt++);
+            std::string h_lbl = blocks[h].label;
+            IRBlock pre_blk(pre_lbl);
+            pre_blk.insts.push_back({IROp::JMP, h_lbl, "", "", {}, {}});
+            pre_blk.preds = outside_preds;
+            pre_blk.succs = {h};
+            blocks.push_back(std::move(pre_blk));
+            idom.push_back(idom[h]);
+            idom[h] = preheader;
+            std::unordered_set<std::string> outside_labels;
+            for (int p : outside_preds) {
+                outside_labels.insert(blocks[p].label);
+                auto& term = blocks[p].insts.back();
+                if (term.op == IROp::JMP && term.dst == h_lbl) term.dst = pre_lbl;
+                if (term.op == IROp::BR_COND) {
+                    if (term.dst == h_lbl) term.dst = pre_lbl;
+                    if (term.src2 == h_lbl) term.src2 = pre_lbl;
+                }
+                for (int& s : blocks[p].succs) {
+                    if (s == h) { s = preheader; break; }
+                }
+            }
+            std::vector<int> new_h_preds = {preheader};
+            for (int p : blocks[h].preds) {
+                if (lp.body.count(p)) new_h_preds.push_back(p);
+            }
+            blocks[h].preds = std::move(new_h_preds);
+            for (auto& inst : blocks[h].insts) {
+                if (inst.op == IROp::PHI) {
+                    for (auto& [lbl, val] : inst.phi_in) {
+                        if (outside_labels.count(lbl)) lbl = pre_lbl;
+                    }
+                }
+            }
+        }
+        auto& p_insts = blocks[preheader].insts;
+        auto pos = p_insts.empty() ? p_insts.end() : (p_insts.end() - 1);
+        p_insts.insert(pos, hoisted.begin(), hoisted.end());
     }
 }
