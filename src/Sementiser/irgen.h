@@ -40,6 +40,7 @@ public:
     void eliminate_phis();
     std::vector<std::unordered_set<std::string>> live_inout();
     std::vector<LiveInterval> construct_intervals(const std::vector<std::string>& params, const std::vector<int>& block_start, const std::vector<int>& block_end, const std::vector<int>& call_indices, std::vector<std::unordered_set<std::string>> live_out);
+    void inline_functions(std::vector<IRFunc>& funcs);
 };
 
 inline bool is_vreg(const std::string& s);

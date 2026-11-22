@@ -501,3 +501,77 @@ std::vector<LiveInterval> IRGenerator::construct_intervals(const std::vector<std
     }
     return intervals;
 }
+
+void IRGenerator::inline_functions(std::vector<IRFunc>& funcs) {
+    std::unordered_map<std::string, IRFunc> func_map;
+    for (const auto& fn : funcs) {
+        bool is_leaf = true;
+        for (const auto& inst : fn.insts) {
+            if (inst.op == IROp::CALL) { is_leaf = false; break; }
+        }
+        if (is_leaf && fn.insts.size() <= 80) {
+            func_map[fn.name] = fn;
+        }
+    }
+    int inline_id = 0;
+    for (auto& caller : funcs) {
+        std::vector<IRInst> hoisted_allocas;
+        std::vector<IRInst> new_insts;
+        for (const auto& call_inst : caller.insts) {
+            if (call_inst.op != IROp::CALL || call_inst.src1 == caller.name || !func_map.count(call_inst.src1)) {
+                new_insts.push_back(call_inst);
+                continue;
+            }
+            const auto& callee = func_map[call_inst.src1];
+            std::string suffix = ".inl_" + std::to_string(inline_id++);
+            std::string exit_label = "L_inl_end" + suffix;
+            std::unordered_map<std::string, std::string> val_map;
+            for (size_t k = 0; k < callee.params.size() && k < call_inst.args.size(); ++k) {
+                const std::string& p = callee.params[k];
+                val_map[p] = call_inst.args[k];
+                if (!p.empty() && p[0] != '%') val_map["%" + p] = call_inst.args[k];
+                else if (p.size() > 1) val_map[p.substr(1)] = call_inst.args[k];
+            }
+            auto rename_val = [&](const std::string& v) -> std::string {
+                if (v.empty()) return "";
+                if (val_map.count(v)) return val_map[v];
+                if (v[0] == '%') return v + suffix;
+                return v;
+            };
+            auto rename_lbl = [&](const std::string& l) -> std::string {
+                return l.empty() ? "" : (l + suffix);
+            };
+            std::string ret_ptr;
+            if (!call_inst.dst.empty()) {
+                ret_ptr = "%inl_ret" + suffix;
+                hoisted_allocas.push_back({IROp::ALLOCA, ret_ptr, "", "", {}, {}});
+            }
+            for (const auto& inst : callee.insts) {
+                if (inst.op == IROp::ALLOCA) {
+                    hoisted_allocas.push_back({IROp::ALLOCA, rename_val(inst.dst), "", "", {}, {}});
+                } else if (inst.op == IROp::LABEL) {
+                    new_insts.push_back({IROp::LABEL, rename_lbl(inst.dst), "", "", {}, {}});
+                } else if (inst.op == IROp::JMP) {
+                    new_insts.push_back({IROp::JMP, rename_lbl(inst.dst), "", "", {}, {}});
+                } else if (inst.op == IROp::BR_COND) {
+                    new_insts.push_back({IROp::BR_COND, rename_lbl(inst.dst), rename_val(inst.src1), rename_lbl(inst.src2), {}, {}});
+                } else if (inst.op == IROp::RET) {
+                    if (!ret_ptr.empty() && !inst.src1.empty()) {
+                        new_insts.push_back({IROp::STORE, "", rename_val(inst.src1), ret_ptr, {}, {}});
+                    }
+                    new_insts.push_back({IROp::JMP, exit_label, "", "", {}, {}});
+                } else {
+                    new_insts.push_back({inst.op, rename_val(inst.dst), rename_val(inst.src1), rename_val(inst.src2), {}, {}});
+                }
+            }
+            new_insts.push_back({IROp::LABEL, exit_label, "", "", {}, {}});
+            if (!ret_ptr.empty()) {
+                new_insts.push_back({IROp::LOAD, call_inst.dst, ret_ptr, "", {}, {}});
+            }
+        }
+        if (!hoisted_allocas.empty()) {
+            new_insts.insert(new_insts.begin(), hoisted_allocas.begin(), hoisted_allocas.end());
+        }
+        caller.insts = std::move(new_insts);
+    }
+}

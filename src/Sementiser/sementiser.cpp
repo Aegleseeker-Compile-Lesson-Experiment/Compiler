@@ -15,6 +15,17 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     // std::ofstream cg_file("test.s");
     // cg_file << cg.generate(functions_ir);
     // cg_file.close();
+    ir.inline_functions(functions_ir);
+    for (const auto& ir_fn : functions_ir) {
+        ir.blocks.clear();
+        ir.label_block.clear();
+        ir.ssa_id = 0;
+        ir.cur_block = 0;
+        ir.construct_blocks(ir_fn);
+        auto intervals = ir.mem2reg(ir_fn.params);
+        cg.alloc = cg.linear_scan_allocate(intervals);
+        cg.debug_generate(ir.blocks, ir_fn);
+    }
     if (gen_code) {
         std::cout << cg.generate(functions_ir);
     }
@@ -256,11 +267,7 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     ir.ir_body.clear();
     ir.entry_allocas_insts.clear();
     ir.body_insts.clear();
-    ir.blocks.clear();
-    ir.label_block.clear();
-    ir.cur_block = 0;
     ir.reg_id = 0;
-    ir.ssa_id = 0;
     ir.block_terminated = false;
     Func temp;
     temp.type = node->children[0]->data_type == DataType::INT ? FuncType::INT : FuncType::VOID;
@@ -325,10 +332,6 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     ir_fn.insts.insert(ir_fn.insts.end(), ir.entry_allocas_insts.begin(), ir.entry_allocas_insts.end());
     ir_fn.insts.insert(ir_fn.insts.end(), ir.body_insts.begin(), ir.body_insts.end());
     optimize_ir(ir_fn.insts);
-    ir.construct_blocks(ir_fn);
-    auto intervals = ir.mem2reg(ir_fn.params);
-    cg.alloc = cg.linear_scan_allocate(intervals);
-    cg.debug_generate(ir.blocks, ir_fn);
     functions_ir.push_back(ir_fn);
     return full_func.str();
 }
