@@ -320,7 +320,7 @@ void eliminate_tail_recursion(IRFunc& fn) {
     fn.insts = std::move(new_insts);
 }
 
-void run_licm(std::vector<IRBlock> blocks, std::vector<int>& idom) {
+void run_licm(std::vector<IRBlock>& blocks, std::vector<int>& idom) {
     int N = static_cast<int>(blocks.size());
     auto dominates = [&](int a, int b) -> bool {
         if (a == b) return true;
