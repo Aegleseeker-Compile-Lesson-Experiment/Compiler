@@ -20,7 +20,8 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
         optimize_ir(ir_fn.insts);
     }
     inline_functions(functions_ir);
-    for (const auto& ir_fn : functions_ir) {
+    std::vector<IRUnit> units;
+    for (auto& ir_fn : functions_ir) {
         ir.blocks.clear();
         ir.label_block.clear();
         ir.ssa_id = 0;
@@ -30,11 +31,18 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
         run_cse(ir.blocks, idom);
         run_licm(ir.blocks, idom);
         run_cse(ir.blocks, idom);
+        units.push_back({&ir_fn, std::move(ir.blocks), std::move(idom), {}});
+    }
+    analyze_interprocedural_non_negative(units);
+    for (auto& unit : units) {
+        ir.blocks = std::move(unit.blocks);
+        ir.ssa_id = 0;
+        cg.non_neg_regs = unit.non_neg_vars;
         ir.split_critical_edges();
         ir.eliminate_phis();
-        auto intervals = ir.build_live_intervals(ir_fn.params, ir.blocks);
+        auto intervals = ir.build_live_intervals(unit.fn->params, ir.blocks);
         cg.linear_scan_allocate(intervals);
-        cg.gen_func(ir.blocks, ir_fn);
+        cg.gen_func(ir.blocks, *unit.fn);
     }
     if (gen_code) {
         std::cout << cg.generate();

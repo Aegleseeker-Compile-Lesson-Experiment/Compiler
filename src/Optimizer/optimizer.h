@@ -15,5 +15,6 @@ void eliminate_tail_recursion(IRFunc& fn);
 void run_licm(std::vector<IRBlock>& blocks, std::vector<int>& idom);
 void inline_functions(std::vector<IRFunc>& funcs);
 void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom);
+void analyze_interprocedural_non_negative(std::vector<IRUnit>& units);
 
 #endif //!OPTIMIZER_H

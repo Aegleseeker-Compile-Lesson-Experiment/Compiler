@@ -700,3 +700,440 @@ void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom) {
         }
     }
 }
+
+void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
+    constexpr int64_t I32_MIN = (1 << 31);
+    constexpr int64_t I32_MAX = 0x7fffffff;
+    struct Range {
+        int64_t lo = I32_MIN;
+        int64_t hi = I32_MAX;
+        bool operator==(const Range& o) const { return lo == o.lo && hi == o.hi; }
+    };
+    auto clamp_i32 = [](int64_t lo, int64_t hi) -> Range {
+        if (lo < I32_MIN || hi > I32_MAX || lo > hi) return {I32_MIN, I32_MAX};
+        return {lo, hi};
+    };
+    auto union_range = [](Range a, Range b) -> Range {
+        return {std::min(a.lo, b.lo), std::max(a.hi, b.hi)};
+    };
+    std::unordered_map<std::string, IRUnit*> unit_map;
+    for (auto& u : units) {
+        unit_map[u.fn->name] = &u;
+    }
+    std::unordered_set<std::string> has_internal_caller;
+    for (const auto& u : units) {
+        for (const auto& blk : u.blocks) {
+            if (!blk.used) continue;
+            for (const auto& inst : blk.insts) {
+                if (inst.op == IROp::CALL && unit_map.count(inst.src1)) {
+                    has_internal_caller.insert(inst.src1);
+                }
+            }
+        }
+    }
+    auto is_external_entry = [&](const std::string& name) -> bool {
+        return name == "main" || name == "toyc_entry" || !has_internal_caller.count(name);
+    };
+    std::unordered_map<std::string, std::vector<Range>> param_ranges;
+    std::unordered_map<std::string, Range> ret_ranges;
+    for (const auto& u : units) {
+        size_t nparams = u.fn->params.size();
+        if (is_external_entry(u.fn->name)) {
+            param_ranges[u.fn->name] = std::vector<Range>(nparams, {I32_MIN, I32_MAX});
+        }
+    }
+    auto analyze_one_func = [&](
+        IRUnit& u,
+        std::unordered_map<std::string, std::vector<Range>>& next_param_ranges,
+        std::unordered_map<std::string, std::vector<bool>>& param_seen,
+        std::unordered_map<std::string, Range>& next_ret_ranges,
+        std::unordered_map<std::string, bool>& ret_seen) -> std::unordered_map<std::string, Range> {
+        int N = static_cast<int>(u.blocks.size());
+        std::unordered_map<std::string, int> label_to_id;
+        for (int b = 0; b < N; ++b) {
+            if (u.blocks[b].used && !u.blocks[b].label.empty()) {
+                label_to_id[u.blocks[b].label] = b;
+            }
+        }
+        std::unordered_map<std::string, Range> ranges;
+        if (param_ranges.count(u.fn->name)) {
+            const auto& pr = param_ranges[u.fn->name];
+            for (size_t k = 0; k < u.fn->params.size() && k < pr.size(); ++k) {
+                const std::string& raw_p = u.fn->params[k];
+                if (raw_p.empty()) continue;
+                std::string norm_p = (raw_p[0] == '%') ? raw_p : ("%" + raw_p);
+                ranges[norm_p] = pr[k];
+                ranges[raw_p] = pr[k];
+            }
+        }
+        std::unordered_map<std::string, const IRInst*> def_inst;
+        std::unordered_map<std::string, int> def_block;
+        for (int b = 0; b < N; ++b) {
+            if (!u.blocks[b].used) continue;
+            for (const auto& inst : u.blocks[b].insts) {
+                if (!inst.dst.empty() && inst.dst[0] == '%') {
+                    def_inst[inst.dst] = &inst;
+                    def_block[inst.dst] = b;
+                }
+            }
+        }
+        auto dominates = [&](int a, int b) -> bool {
+            int x = b;
+            while (x >= 0) {
+                if (x == a) return true;
+                if (x == 0) break;
+                x = u.idom[x];
+            }
+            return false;
+        };
+        auto edge_dominates_target = [&](int p, int curr) -> bool {
+            bool has_p = false;
+            for (int q : u.blocks[curr].preds) {
+                if (!u.blocks[q].used) continue;
+                if (q == p) has_p = true;
+                else if (!dominates(curr, q)) return false;
+            }
+            return has_p;
+        };
+        auto base_range = [&](const std::string& op) -> std::pair<bool, Range> {
+            if (op.empty()) return {false, {}};
+            if (op[0] != '%') {
+                int64_t v = std::stoll(op);
+                return {true, {v, v}};
+            }
+            auto it = ranges.find(op);
+            if (it == ranges.end()) return {false, {}};
+            return {true, it->second};
+        };
+        auto apply_icmp_bound = [&](Range r, IROp op, bool is_true, Range rhs_r) -> Range {
+            switch (op) {
+                case IROp::ICMP_SLT:
+                    if (is_true) r.hi = std::min(r.hi, rhs_r.hi - 1);
+                    else r.lo = std::max(r.lo, rhs_r.lo);
+                    break;
+                case IROp::ICMP_SLE:
+                    if (is_true) r.hi = std::min(r.hi, rhs_r.hi);
+                    else r.lo = std::max(r.lo, rhs_r.lo + 1);
+                    break;
+                case IROp::ICMP_SGT:
+                    if (is_true) r.lo = std::max(r.lo, rhs_r.lo + 1);
+                    else r.hi = std::min(r.hi, rhs_r.hi);
+                    break;
+                case IROp::ICMP_SGE:
+                    if (is_true) r.lo = std::max(r.lo, rhs_r.lo);
+                    else r.hi = std::min(r.hi, rhs_r.hi - 1);
+                    break;
+                case IROp::ICMP_EQ:
+                    if (is_true) {
+                        r.lo = std::max(r.lo, rhs_r.lo);
+                        r.hi = std::min(r.hi, rhs_r.hi);
+                    }
+                    break;
+                case IROp::ICMP_NE:
+                    if (!is_true) {
+                        r.lo = std::max(r.lo, rhs_r.lo);
+                        r.hi = std::min(r.hi, rhs_r.hi);
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return (r.lo <= r.hi) ? r : Range{I32_MIN, I32_MAX};
+        };
+        auto narrow_by_cond = [&](auto& self, const std::string& var, Range r,
+                          const std::string& cond_var, bool is_true, int depth) -> Range {
+            if (depth > 16 || cond_var.empty() || cond_var[0] != '%') return r;
+            auto dit = def_inst.find(cond_var);
+            if (dit == def_inst.end()) return r;
+            const IRInst* cond = dit->second;
+            if (cond->op == IROp::MOV) {
+                return self(self, var, r, cond->src1, is_true, depth + 1);
+            }
+            if (cond->op == IROp::ICMP_NE || cond->op == IROp::ICMP_EQ) {
+                bool flip = (cond->op == IROp::ICMP_EQ);
+                if (cond->src2 == "0" && cond->src1 != var && !cond->src1.empty() && cond->src1[0] == '%') {
+                    return self(self, var, r, cond->src1, flip ? !is_true : is_true, depth + 1);
+                }
+                if (cond->src1 == "0" && cond->src2 != var && !cond->src2.empty() && cond->src2[0] == '%') {
+                    return self(self, var, r, cond->src2, flip ? !is_true : is_true, depth + 1);
+                }
+            }
+            if (cond->src1 == var) {
+                auto [ok_rhs, rhs_r] = base_range(cond->src2);
+                if (!ok_rhs) rhs_r = {I32_MIN, I32_MAX};
+                return apply_icmp_bound(r, cond->op, is_true, rhs_r);
+            }
+            if (cond->src2 == var) {
+                auto [ok_lhs, lhs_r] = base_range(cond->src1);
+                if (!ok_lhs) lhs_r = {I32_MIN, I32_MAX};
+                IROp flipped = cond->op;
+                if (flipped == IROp::ICMP_SLT) flipped = IROp::ICMP_SGT;
+                else if (flipped == IROp::ICMP_SGT) flipped = IROp::ICMP_SLT;
+                else if (flipped == IROp::ICMP_SLE) flipped = IROp::ICMP_SGE;
+                else if (flipped == IROp::ICMP_SGE) flipped = IROp::ICMP_SLE;
+                return apply_icmp_bound(r, flipped, is_true, lhs_r);
+            }
+            if (cond->op == IROp::PHI) {
+                std::string unique_pred_lbl;
+                std::string unique_val;
+                int match_cnt = 0;
+                for (const auto& [in_lbl, val] : cond->phi_in) {
+                    bool can_match = true;
+                    if (!val.empty() && val[0] != '%') {
+                        int64_t v = std::stoll(val);
+                        can_match = is_true ? (v != 0) : (v == 0);
+                    } else {
+                        auto [ok, vr] = base_range(val);
+                        if (ok) {
+                            can_match = is_true ? (vr.lo != 0 || vr.hi != 0) : (vr.lo <= 0 && vr.hi >= 0);
+                        }
+                    }
+                    if (can_match) {
+                        unique_pred_lbl = in_lbl;
+                        unique_val = val;
+                        ++match_cnt;
+                    }
+                }
+                if (match_cnt == 1) {
+                    if (!unique_val.empty() && unique_val[0] == '%') {
+                        r = self(self, var, r, unique_val, is_true, depth + 1);
+                    }
+                    auto lit = label_to_id.find(unique_pred_lbl);
+                    if (lit != label_to_id.end()) {
+                        int cur = lit->second;
+                        int phi_blk = def_block.count(cond_var) ? def_block[cond_var] : -1;
+                        int stop_dom = (phi_blk > 0) ? u.idom[phi_blk] : -1;
+                        while (cur > 0 && cur != stop_dom && u.blocks[cur].preds.size() == 1) {
+                            int p_prev = u.blocks[cur].preds[0];
+                            if (p_prev >= 0 && p_prev < N && u.blocks[p_prev].used && !u.blocks[p_prev].insts.empty()) {
+                                const auto& p_br = u.blocks[p_prev].insts.back();
+                                if (p_br.op == IROp::BR_COND && p_br.dst != p_br.src2) {
+                                    if (p_br.dst == u.blocks[cur].label) {
+                                        r = self(self, var, r, p_br.src1, true, depth + 1);
+                                    } else if (p_br.src2 == u.blocks[cur].label) {
+                                        r = self(self, var, r, p_br.src1, false, depth + 1);
+                                    }
+                                }
+                            }
+                            cur = p_prev;
+                        }
+                    }
+                }
+            }
+            return r;
+        };
+        auto narrow_on_edge = [&](const std::string& var, Range r, int pred, const std::string& succ_label) -> Range {
+            if (pred < 0 || pred >= N || !u.blocks[pred].used) return r;
+            const auto& p_insts = u.blocks[pred].insts;
+            if (p_insts.empty()) return r;
+            const auto& br = p_insts.back();
+            if (br.op != IROp::BR_COND || br.dst == br.src2) return r;
+            if (br.dst == succ_label) return narrow_by_cond(narrow_by_cond, var, r, br.src1, true, 0);
+            if (br.src2 == succ_label) return narrow_by_cond(narrow_by_cond, var, r, br.src1, false, 0);
+            return r;
+        };
+        auto eval_in_block = [&](const std::string& op, int b) -> std::pair<bool, Range> {
+            auto [ok, r] = base_range(op);
+            if (!ok || op[0] != '%') return {ok, r};
+            int curr = b;
+            while (curr > 0 && u.idom[curr] >= 0) {
+                int p = u.idom[curr];
+                if (u.blocks[p].succs.size() == 2 && edge_dominates_target(p, curr)) {
+                    r = narrow_on_edge(op, r, p, u.blocks[curr].label);
+                }
+                curr = p;
+            }
+            return {true, r};
+        };
+        bool changed = true;
+        int iter = 0;
+        while (changed && iter < 20) {
+            changed = false;
+            ++iter;
+            for (int b = 0; b < N; ++b) {
+                if (!u.blocks[b].used) continue;
+                for (const auto& inst : u.blocks[b].insts) {
+                    if (inst.dst.empty() || inst.dst[0] != '%') continue;
+                    bool has_new = false;
+                    Range nr{I32_MIN, I32_MAX};
+                    if (inst.op == IROp::PHI) {
+                        int64_t lo = I32_MAX, hi = I32_MIN;
+                        for (const auto& [pred_lbl, val] : inst.phi_in) {
+                            auto pit = label_to_id.find(pred_lbl);
+                            auto [ok, r] = (pit != label_to_id.end())
+                                            ? eval_in_block(val, pit->second)
+                                            : base_range(val);
+                            if (!ok) continue;
+                            if (pit != label_to_id.end()) {
+                                r = narrow_on_edge(val, r, pit->second, u.blocks[b].label);
+                            }
+                            lo = std::min(lo, r.lo);
+                            hi = std::max(hi, r.hi);
+                            has_new = true;
+                        }
+                        if (has_new) nr = {lo, hi};
+                    } else if (inst.op == IROp::MOV) {
+                        auto [ok, r] = eval_in_block(inst.src1, b);
+                        if (ok) { nr = r; has_new = true; }
+                    } else if (inst.op == IROp::ADD) {
+                        auto [ok1, r1] = eval_in_block(inst.src1, b);
+                        auto [ok2, r2] = eval_in_block(inst.src2, b);
+                        if (ok1 && ok2) { nr = clamp_i32(r1.lo + r2.lo, r1.hi + r2.hi); has_new = true; }
+                    } else if (inst.op == IROp::SUB) {
+                        auto [ok1, r1] = eval_in_block(inst.src1, b);
+                        auto [ok2, r2] = eval_in_block(inst.src2, b);
+                        if (ok1 && ok2) { nr = clamp_i32(r1.lo - r2.hi, r1.hi - r2.lo); has_new = true; }
+                    } else if (inst.op == IROp::MUL) {
+                        auto [ok1, r1] = eval_in_block(inst.src1, b);
+                        auto [ok2, r2] = eval_in_block(inst.src2, b);
+                        if (ok1 && ok2) {
+                            int64_t p1 = r1.lo * r2.lo, p2 = r1.lo * r2.hi;
+                            int64_t p3 = r1.hi * r2.lo, p4 = r1.hi * r2.hi;
+                            nr = clamp_i32(std::min({p1, p2, p3, p4}), std::max({p1, p2, p3, p4}));
+                            has_new = true;
+                        }
+                    } else if (inst.op == IROp::SDIV) {
+                        auto [ok1, r1] = eval_in_block(inst.src1, b);
+                        auto [ok2, r2] = eval_in_block(inst.src2, b);
+                        if (ok1 && ok2 && r2.lo > 0) {
+                            int64_t lo = (r1.lo >= 0) ? (r1.lo / r2.hi) : (r1.lo / r2.lo);
+                            int64_t hi = (r1.hi >= 0) ? (r1.hi / r2.lo) : (r1.hi / r2.hi);
+                            nr = clamp_i32(lo, hi);
+                            has_new = true;
+                        }
+                    } else if (inst.op == IROp::SREM) {
+                        auto [ok1, r1] = eval_in_block(inst.src1, b);
+                        auto [ok2, r2] = eval_in_block(inst.src2, b);
+                        if (ok1 && ok2 && r2.lo == r2.hi && r2.lo != 0) {
+                            int64_t ad = std::abs(r2.lo);
+                            if (r1.lo >= 0) nr = {0, std::min(r1.hi, ad - 1)};
+                            else            nr = {-(ad - 1), ad - 1};
+                            has_new = true;
+                        }
+                    } else if (inst.op == IROp::CALL) {
+                        if (!unit_map.count(inst.src1)) {
+                            nr = {I32_MIN, I32_MAX};
+                            has_new = true;
+                        } else if (ret_ranges.count(inst.src1)) {
+                            nr = ret_ranges[inst.src1];
+                            has_new = true;
+                        }
+                    } else if (inst.op == IROp::LOAD) {
+                        nr = {I32_MIN, I32_MAX};
+                        has_new = true;
+                    }
+                    if (!has_new) continue;
+                    auto it = ranges.find(inst.dst);
+                    if (it == ranges.end()) {
+                        ranges[inst.dst] = nr;
+                        changed = true;
+                    } else {
+                        if (inst.op == IROp::PHI && iter > 8) {
+                            if (nr.lo < it->second.lo) nr.lo = (nr.lo >= 0) ? 0 : I32_MIN;
+                            if (nr.hi > it->second.hi) nr.hi = I32_MAX;
+                        }
+                        if (!(it->second == nr)) {
+                            it->second = nr;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        for (int b = 0; b < N; ++b) {
+            if (!u.blocks[b].used) continue;
+            for (const auto& inst : u.blocks[b].insts) {
+                if (inst.op == IROp::CALL && unit_map.count(inst.src1) && !is_external_entry(inst.src1)) {
+                    const std::string& callee = inst.src1;
+                    size_t nparams = unit_map[callee]->fn->params.size();
+                    next_param_ranges.try_emplace(callee, nparams, Range{I32_MIN, I32_MAX});
+                    param_seen.try_emplace(callee, nparams, false);
+                    for (size_t k = 0; k < nparams && k < inst.args.size(); ++k) {
+                        auto [ok, r] = eval_in_block(inst.args[k], b);
+                        if (!ok) continue;
+                        if (!param_seen[callee][k]) {
+                            next_param_ranges[callee][k] = r;
+                            param_seen[callee][k] = true;
+                        } else {
+                            next_param_ranges[callee][k] = union_range(next_param_ranges[callee][k], r);
+                        }
+                    }
+                } else if (inst.op == IROp::RET && !inst.src1.empty()) {
+                    auto [ok, r] = eval_in_block(inst.src1, b);
+                    if (!ok) continue;
+                    if (!ret_seen[u.fn->name]) {
+                        next_ret_ranges[u.fn->name] = r;
+                        ret_seen[u.fn->name] = true;
+                    } else {
+                        next_ret_ranges[u.fn->name] = union_range(next_ret_ranges[u.fn->name], r);
+                    }
+                }
+            }
+        }
+        return ranges;
+    };
+    bool inter_changed = true;
+    int outer_iter = 0;
+    while (inter_changed && outer_iter < 10) {
+        inter_changed = false;
+        ++outer_iter;
+        std::unordered_map<std::string, std::vector<Range>> next_param_ranges;
+        std::unordered_map<std::string, std::vector<bool>> param_seen;
+        std::unordered_map<std::string, Range> next_ret_ranges;
+        std::unordered_map<std::string, bool> ret_seen;
+        for (auto& u : units) {
+            if (is_external_entry(u.fn->name)) {
+                next_param_ranges[u.fn->name] = std::vector<Range>(u.fn->params.size(), {I32_MIN, I32_MAX});
+            }
+            analyze_one_func(u, next_param_ranges, param_seen, next_ret_ranges, ret_seen);
+        }
+        for (auto& [fname, new_vec] : next_param_ranges) {
+            auto it = param_ranges.find(fname);
+            if (it == param_ranges.end()) {
+                param_ranges[fname] = std::move(new_vec);
+                inter_changed = true;
+            } else {
+                for (size_t k = 0; k < new_vec.size(); ++k) {
+                    Range merged = union_range(it->second[k], new_vec[k]);
+                    if (outer_iter > 5) {
+                        if (merged.lo < it->second[k].lo) merged.lo = (merged.lo >= 0) ? 0 : I32_MIN;
+                        if (merged.hi > it->second[k].hi) merged.hi = I32_MAX;
+                    }
+                    if (!(it->second[k] == merged)) {
+                        it->second[k] = merged;
+                        inter_changed = true;
+                    }
+                }
+            }
+        }
+        for (auto& [fname, new_r] : next_ret_ranges) {
+            auto it = ret_ranges.find(fname);
+            if (it == ret_ranges.end()) {
+                ret_ranges[fname] = new_r;
+                inter_changed = true;
+            } else {
+                Range merged = union_range(it->second, new_r);
+                if (outer_iter > 5) {
+                    if (merged.lo < it->second.lo) merged.lo = (merged.lo >= 0) ? 0 : I32_MIN;
+                    if (merged.hi > it->second.hi) merged.hi = I32_MAX;
+                }
+                if (!(it->second == merged)) {
+                    it->second = merged;
+                    inter_changed = true;
+                }
+            }
+        }
+    }
+    std::unordered_map<std::string, std::vector<Range>> dummy_p;
+    std::unordered_map<std::string, std::vector<bool>> dummy_ps;
+    std::unordered_map<std::string, Range> dummy_r;
+    std::unordered_map<std::string, bool> dummy_rs;
+    for (auto& u : units) {
+        auto final_ranges = analyze_one_func(u, dummy_p, dummy_ps, dummy_r, dummy_rs);
+        for (const auto& [var, r] : final_ranges) {
+            if (r.lo >= 0) {
+                u.non_neg_vars.insert(var);
+            }
+        }
+    }
+}

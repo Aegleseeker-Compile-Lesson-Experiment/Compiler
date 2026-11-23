@@ -112,6 +112,13 @@ struct IRFunc {
     std::vector<IRInst> insts;
 };
 
+struct IRUnit {
+    IRFunc* fn;
+    std::vector<IRBlock> blocks;
+    std::vector<int> idom;
+    std::unordered_set<std::string> non_neg_vars;
+};
+
 struct LiveInterval {
     std::string reg;
     int start = 1e9;

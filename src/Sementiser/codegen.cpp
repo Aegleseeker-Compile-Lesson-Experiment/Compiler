@@ -442,12 +442,13 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
                     }
                     if (c2) {
                         int val = static_cast<int>(std::stoll(inst.src2));
-                        if (is_div) gen_div(inst.dst, inst.src1, val, true);
-                        else gen_rem(inst.dst, inst.src1, val, true);
+                        bool is_non_neg = non_neg_regs.count(inst.src1) > 0;
+                        if (is_div) gen_div(inst.dst, inst.src1, val, true, is_non_neg);
+                        else gen_rem(inst.dst, inst.src1, val, true, is_non_neg);
                     } else if (c1) {
                         int val = static_cast<int>(std::stoll(inst.src1));
-                        if (is_div) gen_div(inst.dst, inst.src2, val, false);
-                        else gen_rem(inst.dst, inst.src2, val, false);
+                        if (is_div) gen_div(inst.dst, inst.src2, val, false, false);
+                        else gen_rem(inst.dst, inst.src2, val, false, false);
                     } else {
                         std::string r1 = use_operand(inst.src1, "t5");
                         std::string r2 = use_operand(inst.src2, "t6");
@@ -763,10 +764,24 @@ void CodeGen::gen_mul(const std::string& dst_vreg, const std::string& var_op, in
     }
 }
 
-void CodeGen::gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided) {
+void CodeGen::gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided, bool non_neg) {
     std::string r_in = use_operand(var_op, "t5");
     std::string rd = def_operand(dst_vreg, "t5");
     bool dst_in_phys = alloc.reg_map.count(dst_vreg) > 0;
+    if (divided && non_neg && value != 0 && value != 1 && value != -1 && value != (1 << 31)) {
+        unsigned int ad = (value < 0) ? (0u - static_cast<unsigned int>(value)) : static_cast<unsigned int>(value);
+        if ((ad & (ad - 1)) == 0) {
+            int k = __builtin_ctz(ad);
+            if (value > 0) {
+                insts.push_back({"srliw", rd, r_in, "", k, ""});
+            } else {
+                insts.push_back({"srliw", "t6", r_in, "", k, ""});
+                insts.push_back({"subw", rd, "zero", "t6", 0, ""});
+            }
+            commit_dst(dst_vreg, "t5");
+            return;
+        }
+    }
     if (r_in == "t5") {
         if (!divided && value == 0) {
             insts.push_back({"li", "t5", "", "", 0, ""});
@@ -889,10 +904,24 @@ void CodeGen::gen_div(const std::string& dst_vreg, const std::string& var_op, in
     }
 }
 
-void CodeGen::gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided) {
+void CodeGen::gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided, bool non_neg) {
     std::string r_in = use_operand(var_op, "t5");
     std::string rd = def_operand(dst_vreg, "t5");
     bool dst_in_phys = alloc.reg_map.count(dst_vreg) > 0;
+    if (divided && non_neg && value != 0 && value != 1 && value != -1 && value != (1 << 31)) {
+        unsigned int ad = (value < 0) ? (0u - static_cast<unsigned int>(value)) : static_cast<unsigned int>(value);
+        if ((ad & (ad - 1)) == 0) {
+            int mask = static_cast<int>(ad - 1);
+            if (mask <= 2047) {
+                insts.push_back({"andi", rd, r_in, "", mask, ""});
+            } else {
+                insts.push_back({"li", "t6", "", "", mask, ""});
+                insts.push_back({"and", rd, r_in, "t6", 0, ""});
+            }
+            commit_dst(dst_vreg, "t5");
+            return;
+        }
+    }
     if (r_in == "t5") {
         if (!divided && value == 0) {
             insts.push_back({"li", "t5", "", "", 0, ""});

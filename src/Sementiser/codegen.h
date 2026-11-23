@@ -26,12 +26,13 @@ private:
     void commit_dst(const std::string& dst, const std::string& scratch);
     void emit_parallel_moves(const std::vector<std::pair<std::string, std::string>>& moves);
     void gen_mul(const std::string& dst_vreg, const std::string& var_op, int value);
-    void gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided);
-    void gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided);
+    void gen_div(const std::string& dst_vreg, const std::string& var_op, int value, bool divided, bool non_neg);
+    void gen_rem(const std::string& dst_vreg, const std::string& var_op, int value, bool divided, bool non_neg);
     void serialize_asm();
 
 public:
     RegAllocResult alloc;
+    std::unordered_set<std::string> non_neg_regs;
 
     void linear_scan_allocate(std::vector<LiveInterval>& intervals);
     void gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func);
