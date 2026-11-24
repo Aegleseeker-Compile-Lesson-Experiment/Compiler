@@ -29,6 +29,11 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
         ir.construct_blocks(ir_fn);
         auto idom = ir.mem2reg();
         run_cse(ir.blocks, idom);
+        run_linear_combine(ir.blocks, idom, ir.ssa_id);
+        run_licm(ir.blocks, idom);
+        reassociate_loop_adds(ir.blocks, idom);
+        run_licm(ir.blocks, idom);
+        run_ivsr(ir.blocks, idom, ir.ssa_id);
         run_licm(ir.blocks, idom);
         run_cse(ir.blocks, idom);
         units.push_back({&ir_fn, std::move(ir.blocks), std::move(idom), {}});

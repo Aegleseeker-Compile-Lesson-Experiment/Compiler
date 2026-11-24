@@ -791,3 +791,16 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
     }
     sem_stack.push(result);
 }
+
+bool try_parse_i64(const std::string& s, long long& out) {
+    if (s.empty()) return false;
+    size_t pos = 0;
+    try {
+        long long v = std::stoll(s, &pos);
+        if (pos != s.size()) return false;
+        out = static_cast<long long>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}

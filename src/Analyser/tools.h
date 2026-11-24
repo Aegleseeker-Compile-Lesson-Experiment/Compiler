@@ -25,5 +25,6 @@ void solve_left_recursion();
 FollowSymbols get_follow_symbols(ptrdiff_t cdot_position, const Production &production, const std::unordered_set<std::string> &follow_symbols);
 ASTNode* token_to_astnode(const Token &token);
 void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Production rhs);
+bool try_parse_i64(const std::string& s, long long& out);
 
 #endif // TOOLS_H

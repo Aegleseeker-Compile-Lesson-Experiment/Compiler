@@ -702,16 +702,16 @@ void run_cse(std::vector<IRBlock>& blocks, const std::vector<int>& idom) {
 }
 
 void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
-    constexpr int64_t I32_MIN = (1 << 31);
-    constexpr int64_t I32_MAX = 0x7fffffff;
+    const long long I32_MIN = -(1LL << 31);
+    const long long I32_MAX = 0x7fffffff;
     struct Range {
-        int64_t lo = I32_MIN;
-        int64_t hi = I32_MAX;
+        long long lo = I32_MIN;
+        long long hi = I32_MAX;
         bool operator==(const Range& o) const { return lo == o.lo && hi == o.hi; }
     };
-    auto clamp_i32 = [](int64_t lo, int64_t hi) -> Range {
-        if (lo < I32_MIN || hi > I32_MAX || lo > hi) return {I32_MIN, I32_MAX};
-        return {lo, hi};
+    auto clamp_i32 = [](long long lo, long long hi) -> Range {
+        if (hi < I32_MIN || lo > I32_MAX || lo > hi) return {I32_MIN, I32_MAX};
+        return {std::max(lo, -(1LL << 31)), std::min(hi, 0x7fffffffll)};
     };
     auto union_range = [](Range a, Range b) -> Range {
         return {std::min(a.lo, b.lo), std::max(a.hi, b.hi)};
@@ -798,7 +798,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         auto base_range = [&](const std::string& op) -> std::pair<bool, Range> {
             if (op.empty()) return {false, {}};
             if (op[0] != '%') {
-                int64_t v = std::stoll(op);
+                long long v = std::stoll(op);
                 return {true, {v, v}};
             }
             auto it = ranges.find(op);
@@ -842,7 +842,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         };
         auto narrow_by_cond = [&](auto& self, const std::string& var, Range r,
                           const std::string& cond_var, bool is_true, int depth) -> Range {
-            if (depth > 16 || cond_var.empty() || cond_var[0] != '%') return r;
+            if (depth > 32 || cond_var.empty() || cond_var[0] != '%') return r;
             auto dit = def_inst.find(cond_var);
             if (dit == def_inst.end()) return r;
             const IRInst* cond = dit->second;
@@ -880,7 +880,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
                 for (const auto& [in_lbl, val] : cond->phi_in) {
                     bool can_match = true;
                     if (!val.empty() && val[0] != '%') {
-                        int64_t v = std::stoll(val);
+                        long long v = std::stoll(val);
                         can_match = is_true ? (v != 0) : (v == 0);
                     } else {
                         auto [ok, vr] = base_range(val);
@@ -957,7 +957,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
                     bool has_new = false;
                     Range nr{I32_MIN, I32_MAX};
                     if (inst.op == IROp::PHI) {
-                        int64_t lo = I32_MAX, hi = I32_MIN;
+                        long long lo = I32_MAX, hi = I32_MIN;
                         for (const auto& [pred_lbl, val] : inst.phi_in) {
                             auto pit = label_to_id.find(pred_lbl);
                             auto [ok, r] = (pit != label_to_id.end())
@@ -987,8 +987,8 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
                         auto [ok1, r1] = eval_in_block(inst.src1, b);
                         auto [ok2, r2] = eval_in_block(inst.src2, b);
                         if (ok1 && ok2) {
-                            int64_t p1 = r1.lo * r2.lo, p2 = r1.lo * r2.hi;
-                            int64_t p3 = r1.hi * r2.lo, p4 = r1.hi * r2.hi;
+                            long long p1 = r1.lo * r2.lo, p2 = r1.lo * r2.hi;
+                            long long p3 = r1.hi * r2.lo, p4 = r1.hi * r2.hi;
                             nr = clamp_i32(std::min({p1, p2, p3, p4}), std::max({p1, p2, p3, p4}));
                             has_new = true;
                         }
@@ -996,8 +996,8 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
                         auto [ok1, r1] = eval_in_block(inst.src1, b);
                         auto [ok2, r2] = eval_in_block(inst.src2, b);
                         if (ok1 && ok2 && r2.lo > 0) {
-                            int64_t lo = (r1.lo >= 0) ? (r1.lo / r2.hi) : (r1.lo / r2.lo);
-                            int64_t hi = (r1.hi >= 0) ? (r1.hi / r2.lo) : (r1.hi / r2.hi);
+                            long long lo = (r1.lo >= 0) ? (r1.lo / r2.hi) : (r1.lo / r2.lo);
+                            long long hi = (r1.hi >= 0) ? (r1.hi / r2.lo) : (r1.hi / r2.hi);
                             nr = clamp_i32(lo, hi);
                             has_new = true;
                         }
@@ -1005,7 +1005,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
                         auto [ok1, r1] = eval_in_block(inst.src1, b);
                         auto [ok2, r2] = eval_in_block(inst.src2, b);
                         if (ok1 && ok2 && r2.lo == r2.hi && r2.lo != 0) {
-                            int64_t ad = std::abs(r2.lo);
+                            long long ad = std::abs(r2.lo);
                             if (r1.lo >= 0) nr = {0, std::min(r1.hi, ad - 1)};
                             else            nr = {-(ad - 1), ad - 1};
                             has_new = true;
@@ -1133,6 +1133,723 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         for (const auto& [var, r] : final_ranges) {
             if (r.lo >= 0) {
                 u.non_neg_vars.insert(var);
+            }
+        }
+    }
+}
+
+void reassociate_loop_adds(std::vector<IRBlock>& blocks, const std::vector<int>& idom) {
+    int N = static_cast<int>(blocks.size());
+    auto dominates = [&](int a, int b) -> bool {
+        if (a == b) return true;
+        int curr = b;
+        while (curr != 0 && curr != -1) {
+            if (curr == a) return true;
+            curr = idom[curr];
+        }
+        return curr == a;
+    };
+    std::unordered_map<std::string, int> use_cnt;
+    for (int b = 0; b < N; ++b) {
+        if (!blocks[b].used) continue;
+        for (const auto& inst : blocks[b].insts) {
+            if (inst.op == IROp::PHI) {
+                for (const auto& [lbl, val] : inst.phi_in) {
+                    if (!val.empty() && val[0] == '%') use_cnt[val]++;
+                }
+            } else {
+                if (!inst.src1.empty() && inst.src1[0] == '%') use_cnt[inst.src1]++;
+                if (!inst.src2.empty() && inst.src2[0] == '%') use_cnt[inst.src2]++;
+                for (const auto& arg : inst.args) {
+                    if (!arg.empty() && arg[0] == '%') use_cnt[arg]++;
+                }
+            }
+        }
+    }
+    std::unordered_map<int, std::vector<int>> header_latches;
+    for (int u = 0; u < N; ++u) {
+        if (!blocks[u].used) continue;
+        for (int h : blocks[u].succs) {
+            if (dominates(h, u)) header_latches[h].push_back(u);
+        }
+    }
+    struct LoopInfo {
+        int header;
+        std::unordered_set<int> body;
+    };
+    std::vector<LoopInfo> loops;
+    loops.reserve(header_latches.size());
+    for (const auto& [h, latches] : header_latches) {
+        std::unordered_set<int> body = {h};
+        std::vector<int> wl;
+        for (int u : latches) {
+            if (body.insert(u).second) wl.push_back(u);
+        }
+        while (!wl.empty()) {
+            int cur = wl.back();
+            wl.pop_back();
+            if (cur == h) continue;
+            for (int p : blocks[cur].preds) {
+                if (body.insert(p).second) wl.push_back(p);
+            }
+        }
+        loops.push_back({h, std::move(body)});
+    }
+    std::sort(loops.begin(), loops.end(), [](const LoopInfo& a, const LoopInfo& b) {
+        return a.body.size() < b.body.size();
+    });
+    for (const auto& lp : loops) {
+        std::unordered_set<std::string> def_in_loop;
+        for (int b : lp.body) {
+            for (const auto& inst : blocks[b].insts) {
+                if (!inst.dst.empty() && inst.dst[0] == '%') def_in_loop.insert(inst.dst);
+            }
+        }
+        auto is_inv = [&](const std::string& op) {
+            return op.empty() || op[0] != '%' || !def_in_loop.count(op);
+        };
+        for (int b : lp.body) {
+            bool changed = true;
+            while (changed) {
+                changed = false;
+                std::unordered_map<std::string, size_t> def_idx;
+                for (size_t i = 0; i < blocks[b].insts.size(); ++i) {
+                    const auto& inst = blocks[b].insts[i];
+                    if (!inst.dst.empty() && inst.dst[0] == '%') def_idx[inst.dst] = i;
+                }
+                for (size_t i = 0; i < blocks[b].insts.size(); ++i) {
+                    auto& inst2 = blocks[b].insts[i];
+                    if (inst2.op != IROp::ADD) continue;
+                    auto try_reassoc = [&](std::string sub_vreg, std::string outer_inv) -> bool {
+                        if (sub_vreg.empty() || sub_vreg[0] != '%') return false;
+                        if (!is_inv(outer_inv)) return false;
+                        auto u_it = use_cnt.find(sub_vreg);
+                        if (u_it == use_cnt.end() || u_it->second != 1) return false;
+                        auto it = def_idx.find(sub_vreg);
+                        if (it == def_idx.end() || it->second >= i) return false;
+
+                        size_t idx1 = it->second;
+                        auto& inst1 = blocks[b].insts[idx1];
+                        if (inst1.op != IROp::ADD) return false;
+
+                        std::string inner_var, inner_inv;
+                        if (!is_inv(inst1.src1) && is_inv(inst1.src2)) {
+                            inner_var = inst1.src1;
+                            inner_inv = inst1.src2;
+                        } else if (is_inv(inst1.src1) && !is_inv(inst1.src2)) {
+                            inner_var = inst1.src2;
+                            inner_inv = inst1.src1;
+                        } else {
+                            return false;
+                        }
+                        inst1.src1 = inner_inv;
+                        inst1.src2 = outer_inv;
+                        inst2.src1 = inner_var;
+                        inst2.src2 = sub_vreg;
+                        def_in_loop.erase(sub_vreg);
+                        if (idx1 + 1 < i) {
+                            std::rotate(blocks[b].insts.begin() + idx1,
+                                        blocks[b].insts.begin() + idx1 + 1,
+                                        blocks[b].insts.begin() + i);
+                        }
+                        return true;
+                    };
+                    if (try_reassoc(inst2.src1, inst2.src2) || try_reassoc(inst2.src2, inst2.src1)) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void run_ivsr(std::vector<IRBlock>& blocks, const std::vector<int>& idom, int& ssa_reg_counter) {
+    int N = static_cast<int>(blocks.size());
+    auto new_reg = [&]() { return "%iv_" + std::to_string(ssa_reg_counter++); };
+    auto dominates = [&](int a, int b) -> bool {
+        if (a == b) return true;
+        int curr = b;
+        while (curr != 0 && curr != -1) {
+            if (curr == a) return true;
+            curr = idom[curr];
+        }
+        return curr == a;
+    };
+    auto is_cheap_const_mul = [](long long c) -> bool {
+        if (c == 0 || c == 1 || c == -1) return true;
+        unsigned long long ac = (c < 0)
+            ? static_cast<unsigned long long>(-c)
+            : static_cast<unsigned long long>(c);
+        return (ac & (ac - 1)) == 0;
+    };
+    std::unordered_map<int, std::vector<int>> header_latches;
+    for (int u = 0; u < N; ++u) {
+        if (!blocks[u].used) continue;
+        for (int h : blocks[u].succs) {
+            if (h != 0 && dominates(h, u)) header_latches[h].push_back(u);
+        }
+    }
+    struct LoopInfo {
+        int header;
+        std::unordered_set<int> body;
+    };
+    std::vector<LoopInfo> loops;
+    loops.reserve(header_latches.size());
+    for (const auto& [h, latches] : header_latches) {
+        std::unordered_set<int> body = {h};
+        std::vector<int> wl;
+        for (int u : latches) {
+            if (body.insert(u).second) wl.push_back(u);
+        }
+        while (!wl.empty()) {
+            int cur = wl.back();
+            wl.pop_back();
+            if (cur == h) continue;
+            for (int p : blocks[cur].preds) {
+                if (body.insert(p).second) wl.push_back(p);
+            }
+        }
+        loops.push_back({h, std::move(body)});
+    }
+    std::sort(loops.begin(), loops.end(), [](const LoopInfo& a, const LoopInfo& b) {
+        return a.body.size() < b.body.size();
+    });
+    for (const auto& lp : loops) {
+        int h = lp.header;
+        const auto& body = lp.body;
+        int preheader = -1, latch = -1, out_cnt = 0, in_cnt = 0;
+        for (int p : blocks[h].preds) {
+            if (!body.count(p)) { preheader = p; ++out_cnt; }
+            else { latch = p; ++in_cnt; }
+        }
+        if (out_cnt != 1 || in_cnt != 1 || preheader < 0 || latch < 0) continue;
+        if (blocks[preheader].insts.empty() || blocks[latch].insts.empty()) continue;
+        std::string pre_lbl = blocks[preheader].label;
+        std::string latch_lbl = blocks[latch].label;
+        std::unordered_set<std::string> def_in_loop;
+        for (int b : body) {
+            for (const auto& inst : blocks[b].insts) {
+                if (!inst.dst.empty() && inst.dst[0] == '%') def_in_loop.insert(inst.dst);
+            }
+        }
+        auto is_inv = [&](const std::string& op) {
+            return op.empty() || op[0] != '%' || !def_in_loop.count(op);
+        };
+        std::unordered_map<std::string, int> use_cnt;
+        for (int b = 0; b < N; ++b) {
+            if (!blocks[b].used) continue;
+            for (const auto& inst : blocks[b].insts) {
+                if (inst.op == IROp::PHI) {
+                    for (const auto& [lbl, val] : inst.phi_in) {
+                        if (!val.empty() && val[0] == '%') use_cnt[val]++;
+                    }
+                } else {
+                    if (!inst.src1.empty() && inst.src1[0] == '%') use_cnt[inst.src1]++;
+                    if (!inst.src2.empty() && inst.src2[0] == '%') use_cnt[inst.src2]++;
+                    for (const auto& arg : inst.args) {
+                        if (!arg.empty() && arg[0] == '%') use_cnt[arg]++;
+                    }
+                }
+            }
+        }
+        struct BasicIV {
+            std::string phi_reg;
+            std::string init_val;
+            std::string next_reg;
+            long long step;
+        };
+        std::unordered_map<std::string, BasicIV> basic_ivs;
+        for (const auto& inst : blocks[h].insts) {
+            if (inst.op != IROp::PHI || inst.phi_in.size() != 2) continue;
+            std::string init_v, next_v;
+            for (const auto& [lbl, val] : inst.phi_in) {
+                if (lbl == pre_lbl) init_v = val;
+                else if (lbl == latch_lbl) next_v = val;
+            }
+            if (init_v.empty() || next_v.empty() || next_v[0] != '%') continue;
+            for (const auto& l_inst : blocks[latch].insts) {
+                if (l_inst.dst != next_v) continue;
+                long long step_v = 0;
+                if (l_inst.op == IROp::ADD) {
+                    if (l_inst.src1 == inst.dst && try_parse_i64(l_inst.src2, step_v)) {
+                        basic_ivs[inst.dst] = {inst.dst, init_v, next_v, step_v};
+                    } else if (l_inst.src2 == inst.dst && try_parse_i64(l_inst.src1, step_v)) {
+                        basic_ivs[inst.dst] = {inst.dst, init_v, next_v, step_v};
+                    }
+                } else if (l_inst.op == IROp::SUB && l_inst.src1 == inst.dst &&
+                           try_parse_i64(l_inst.src2, step_v)) {
+                    basic_ivs[inst.dst] = {inst.dst, init_v, next_v, -step_v};
+                }
+            }
+        }
+        if (basic_ivs.empty()) continue;
+        struct Cand {
+            int blk;
+            std::string mul_dst;
+            std::string iv_reg;
+            std::string factor;
+            bool has_bias = false;
+            bool bias_is_sub = false;
+            std::string bias_dst;
+            std::string bias_op;
+        };
+        std::vector<Cand> cands;
+        for (int b : body) {
+            for (const auto& inst : blocks[b].insts) {
+                if (inst.op != IROp::MUL || inst.dst.empty() || inst.dst[0] != '%') continue;
+                std::string iv_op, fac_op;
+                if (basic_ivs.count(inst.src1) && is_inv(inst.src2)) {
+                    iv_op = inst.src1; fac_op = inst.src2;
+                } else if (basic_ivs.count(inst.src2) && is_inv(inst.src1)) {
+                    iv_op = inst.src2; fac_op = inst.src1;
+                } else {
+                    continue;
+                }
+                long long fac_c = 0;
+                if (try_parse_i64(fac_op, fac_c) && is_cheap_const_mul(fac_c)) continue;
+                Cand cand{b, inst.dst, iv_op, fac_op, false, false, "", ""};
+                auto u_it = use_cnt.find(inst.dst);
+                if (u_it != use_cnt.end() && u_it->second == 1) {
+                    bool found = false;
+                    for (int ub : body) {
+                        for (const auto& u_inst : blocks[ub].insts) {
+                            if (u_inst.dst.empty() || u_inst.dst[0] != '%') continue;
+                            if (u_inst.op == IROp::ADD) {
+                                if (u_inst.src1 == inst.dst && is_inv(u_inst.src2)) {
+                                    cand.has_bias = true;
+                                    cand.bias_is_sub = false;
+                                    cand.bias_dst = u_inst.dst;
+                                    cand.bias_op = u_inst.src2;
+                                    found = true;
+                                    break;
+                                } else if (u_inst.src2 == inst.dst && is_inv(u_inst.src1)) {
+                                    cand.has_bias = true;
+                                    cand.bias_is_sub = false;
+                                    cand.bias_dst = u_inst.dst;
+                                    cand.bias_op = u_inst.src1;
+                                    found = true;
+                                    break;
+                                }
+                            } else if (u_inst.op == IROp::SUB &&
+                                       u_inst.src1 == inst.dst && is_inv(u_inst.src2)) {
+                                cand.has_bias = true;
+                                cand.bias_is_sub = true;
+                                cand.bias_dst = u_inst.dst;
+                                cand.bias_op = u_inst.src2;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
+                    }
+                }
+                cands.push_back(std::move(cand));
+                if (cands.size() >= 3) break;
+            }
+            if (cands.size() >= 3) break;
+        }
+        if (cands.empty()) continue;
+        std::unordered_map<std::string, std::string> replace_map;
+        std::unordered_set<std::string> erase_dsts;
+        std::vector<IRInst> pre_inserts, header_phis, latch_inserts;
+        for (const auto& c : cands) {
+            const auto& biv = basic_ivs[c.iv_reg];
+            std::string aux_phi = new_reg();
+            std::string aux_next = new_reg();
+            long long init_c = 0, fac_c = 0;
+            bool init_is_const = try_parse_i64(biv.init_val, init_c);
+            bool fac_is_const = try_parse_i64(c.factor, fac_c);
+            std::string mul_init;
+            if (init_is_const && init_c == 0) {
+                mul_init = "0";
+            } else if (init_is_const && fac_is_const) {
+                int32_t v0 = static_cast<int32_t>(
+                    static_cast<unsigned long long>(init_c) * static_cast<unsigned long long>(fac_c));
+                mul_init = std::to_string(v0);
+            } else {
+                mul_init = new_reg();
+                pre_inserts.push_back({IROp::MUL, mul_init, biv.init_val, c.factor, {}, {}});
+            }
+            std::string aux_init = mul_init;
+            if (c.has_bias) {
+                long long m0 = 0, b0 = 0;
+                bool m_const = try_parse_i64(mul_init, m0);
+                bool b_const = try_parse_i64(c.bias_op, b0);
+                if (m_const && m0 == 0 && !c.bias_is_sub) {
+                    aux_init = c.bias_op;
+                } else if (m_const && b_const) {
+                    unsigned long long res = c.bias_is_sub
+                        ? (static_cast<unsigned long long>(m0) - static_cast<unsigned long long>(b0))
+                        : (static_cast<unsigned long long>(m0) + static_cast<unsigned long long>(b0));
+                    aux_init = std::to_string(static_cast<int32_t>(res));
+                } else {
+                    aux_init = new_reg();
+                    pre_inserts.push_back({c.bias_is_sub ? IROp::SUB : IROp::ADD, aux_init, mul_init, c.bias_op, {}, {}});
+                }
+            }
+            std::string stride_op;
+            if (fac_is_const) {
+                int32_t st = static_cast<int32_t>(
+                    static_cast<unsigned long long>(biv.step) * static_cast<unsigned long long>(fac_c));
+                stride_op = std::to_string(st);
+            } else if (biv.step == 1) {
+                stride_op = c.factor;
+            } else {
+                stride_op = new_reg();
+                pre_inserts.push_back({IROp::MUL, stride_op, std::to_string(biv.step), c.factor, {}, {}});
+            }
+            IRInst phi{};
+            phi.op = IROp::PHI;
+            phi.dst = aux_phi;
+            phi.phi_in = {{pre_lbl, aux_init}, {latch_lbl, aux_next}};
+            header_phis.push_back(std::move(phi));
+            latch_inserts.push_back({IROp::ADD, aux_next, aux_phi, stride_op, {}, {}});
+            erase_dsts.insert(c.mul_dst);
+            if (c.has_bias) {
+                erase_dsts.insert(c.bias_dst);
+                replace_map[c.bias_dst] = aux_phi;
+            } else {
+                replace_map[c.mul_dst] = aux_phi;
+            }
+        }
+        auto& p_insts = blocks[preheader].insts;
+        p_insts.insert(p_insts.end() - 1, pre_inserts.begin(), pre_inserts.end());
+        blocks[h].insts.insert(blocks[h].insts.begin(), header_phis.begin(), header_phis.end());
+        auto& l_insts = blocks[latch].insts;
+        l_insts.insert(l_insts.end() - 1, latch_inserts.begin(), latch_inserts.end());
+        for (int b : body) {
+            std::vector<IRInst> kept;
+            kept.reserve(blocks[b].insts.size());
+            for (auto& inst : blocks[b].insts) {
+                if (erase_dsts.count(inst.dst)) continue;
+                kept.push_back(std::move(inst));
+            }
+            blocks[b].insts = std::move(kept);
+        }
+        for (int b = 0; b < N; ++b) {
+            if (!blocks[b].used) continue;
+            for (auto& inst : blocks[b].insts) {
+                if (inst.op == IROp::PHI) {
+                    for (auto& [lbl, val] : inst.phi_in) {
+                        auto it = replace_map.find(val);
+                        if (it != replace_map.end()) val = it->second;
+                    }
+                } else {
+                    auto it1 = replace_map.find(inst.src1);
+                    if (it1 != replace_map.end()) inst.src1 = it1->second;
+                    auto it2 = replace_map.find(inst.src2);
+                    if (it2 != replace_map.end()) inst.src2 = it2->second;
+                    for (auto& arg : inst.args) {
+                        auto ita = replace_map.find(arg);
+                        if (ita != replace_map.end()) arg = ita->second;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void run_linear_combine(std::vector<IRBlock>& blocks, const std::vector<int>& idom, int& ssa_reg_counter) {
+    int N = static_cast<int>(blocks.size());
+    auto new_reg = [&]() { return "%lc_" + std::to_string(ssa_reg_counter++); };
+    std::vector<int> dom_depth(N, 0);
+    for (int b = 0; b < N; ++b) {
+        if (!blocks[b].used) continue;
+        int d = 0, cur = b;
+        while (cur > 0 && cur < N && idom[cur] >= 0 && idom[cur] != cur) {
+            cur = idom[cur];
+            ++d;
+            if (d > N) break;
+        }
+        dom_depth[b] = d;
+    }
+    std::unordered_map<std::string, int> use_cnt;
+    std::unordered_map<std::string, int> global_def_blk;
+    std::unordered_map<std::string, const IRInst*> global_def_inst;
+    for (int b = 0; b < N; ++b) {
+        if (!blocks[b].used) continue;
+        for (const auto& inst : blocks[b].insts) {
+            if (!inst.dst.empty() && inst.dst[0] == '%') {
+                global_def_blk[inst.dst] = b;
+                global_def_inst[inst.dst] = &inst;
+            }
+            if (inst.op == IROp::PHI) {
+                for (const auto& [lbl, val] : inst.phi_in) {
+                    if (!val.empty() && val[0] == '%') use_cnt[val]++;
+                }
+            } else {
+                if (!inst.src1.empty() && inst.src1[0] == '%') use_cnt[inst.src1]++;
+                if (!inst.src2.empty() && inst.src2[0] == '%') use_cnt[inst.src2]++;
+                for (const auto& arg : inst.args) {
+                    if (!arg.empty() && arg[0] == '%') use_cnt[arg]++;
+                }
+            }
+        }
+    }
+    std::unordered_set<std::string> basic_iv_set;
+    for (int b = 0; b < N; ++b) {
+        if (!blocks[b].used) continue;
+        for (const auto& inst : blocks[b].insts) {
+            if (inst.op != IROp::PHI || inst.dst.empty() || inst.dst[0] != '%') continue;
+            for (const auto& [lbl, val] : inst.phi_in) {
+                auto dit = global_def_inst.find(val);
+                if (dit == global_def_inst.end()) continue;
+                const IRInst* d = dit->second;
+                long long dummy = 0;
+                if (d->op == IROp::ADD &&
+                    ((d->src1 == inst.dst && try_parse_i64(d->src2, dummy)) ||
+                     (d->src2 == inst.dst && try_parse_i64(d->src1, dummy)))) {
+                    basic_iv_set.insert(inst.dst);
+                    break;
+                }
+                if (d->op == IROp::SUB && d->src1 == inst.dst && try_parse_i64(d->src2, dummy)) {
+                    basic_iv_set.insert(inst.dst);
+                    break;
+                }
+            }
+        }
+    }
+    auto var_depth = [&](const std::string& v) -> int {
+        auto it = global_def_blk.find(v);
+        if (it == global_def_blk.end()) return 0;
+        return dom_depth[it->second] + 1;
+    };
+    std::unordered_map<std::string, std::string> global_replace_map;
+    for (int b = 0; b < N; ++b) {
+        if (!blocks[b].used || blocks[b].insts.empty()) continue;
+        auto& insts = blocks[b].insts;
+        size_t M = insts.size();
+        std::unordered_map<std::string, size_t> def_idx;
+        for (size_t i = 0; i < M; ++i) {
+            if (!insts[i].dst.empty() && insts[i].dst[0] == '%') {
+                def_idx[insts[i].dst] = i;
+            }
+        }
+        std::vector<bool> erased(M, false);
+        std::unordered_map<size_t, std::vector<IRInst>> replacements_at;
+        for (size_t i = M; i > 0; i--) {
+            if (erased[i]) continue;
+            const auto& root = insts[i];
+            if (root.op != IROp::ADD && root.op != IROp::SUB) continue;
+            if (root.dst.empty() || root.dst[0] != '%') continue;
+            unsigned int const_sum = 0;
+            std::unordered_map<std::string, unsigned int> coeffs;
+            std::unordered_map<std::string, size_t> first_order;
+            size_t order_tick = 0;
+            std::vector<size_t> tree_indices;
+            std::unordered_set<size_t> visited_idx;
+            size_t old_sub_count = 0;
+            std::vector<std::pair<int, int>> orig_var_ranks;
+            int min_var_depth = 0x07fffffff;
+            int max_depth_before_const = -1;
+            bool saw_const = false;
+            auto record_leaf = [&](const std::string& v, unsigned int scale) {
+                coeffs[v] += scale;
+                if (!first_order.count(v)) first_order[v] = order_tick++;
+                int d = var_depth(v);
+                int non_iv = basic_iv_set.count(v) ? 0 : 1;
+                orig_var_ranks.push_back({d, non_iv});
+                if (d < min_var_depth) min_var_depth = d;
+            };
+            auto collect = [&](auto& self, const std::string& op, unsigned int scale, size_t bound_idx, bool from_mul) -> void {
+                if (op.empty() || scale == 0) return;
+                long long cv = 0;
+                if (try_parse_i64(op, cv)) {
+                    const_sum += scale * static_cast<unsigned int>(cv);
+                    saw_const = true;
+                    if (!orig_var_ranks.empty()) {
+                        max_depth_before_const = std::max(max_depth_before_const, orig_var_ranks.back().first);
+                    }
+                    return;
+                }
+                if (op[0] != '%') return;
+                auto dit = def_idx.find(op);
+                if (dit == def_idx.end() || dit->second >= bound_idx || erased[dit->second]) {
+                    record_leaf(op, scale);
+                    return;
+                }
+                size_t idx = dit->second;
+                auto uit = use_cnt.find(op);
+                if (uit == use_cnt.end() || uit->second != 1 || visited_idx.count(idx)) {
+                    record_leaf(op, scale);
+                    return;
+                }
+                const auto& ins = insts[idx];
+                if (ins.op == IROp::MOV) {
+                    visited_idx.insert(idx);
+                    tree_indices.push_back(idx);
+                    self(self, ins.src1, scale, idx, from_mul);
+                    return;
+                }
+                if (!from_mul && ins.op == IROp::ADD) {
+                    visited_idx.insert(idx);
+                    tree_indices.push_back(idx);
+                    self(self, ins.src1, scale, idx, false);
+                    self(self, ins.src2, scale, idx, false);
+                    return;
+                }
+                if (!from_mul && ins.op == IROp::SUB) {
+                    visited_idx.insert(idx);
+                    tree_indices.push_back(idx);
+                    ++old_sub_count;
+                    self(self, ins.src1, scale, idx, false);
+                    self(self, ins.src2, 0u - scale, idx, false);
+                    return;
+                }
+                if (ins.op == IROp::MUL) {
+                    long long c1 = 0, c2 = 0;
+                    if (try_parse_i64(ins.src2, c2)) {
+                        visited_idx.insert(idx);
+                        tree_indices.push_back(idx);
+                        self(self, ins.src1, scale * static_cast<unsigned int>(c2), idx, true);
+                        return;
+                    }
+                    if (try_parse_i64(ins.src1, c1)) {
+                        visited_idx.insert(idx);
+                        tree_indices.push_back(idx);
+                        self(self, ins.src2, scale * static_cast<unsigned int>(c1), idx, true);
+                        return;
+                    }
+                }
+                record_leaf(op, scale);
+            };
+            visited_idx.insert(i);
+            tree_indices.push_back(i);
+            if (root.op == IROp::ADD) {
+                collect(collect, root.src1, 1u, i, false);
+                collect(collect, root.src2, 1u, i, false);
+            } else {
+                ++old_sub_count;
+                collect(collect, root.src1, 1u, i, false);
+                collect(collect, root.src2, 0u - 1u, i, false);
+            }
+            struct Term {
+                std::string var;
+                int32_t coeff;
+                bool is_neg;
+                int depth;
+                int non_iv;
+                size_t order;
+            };
+            std::vector<Term> terms;
+            terms.reserve(coeffs.size());
+            for (const auto& [v, u_c] : coeffs) {
+                if (u_c == 0) continue;
+                int32_t c = static_cast<int32_t>(u_c);
+                bool neg = (c < 0 && c != (1 << 31));
+                terms.push_back({v, c, neg, var_depth(v), basic_iv_set.count(v) ? 0 : 1, first_order[v]});
+            }
+            std::sort(terms.begin(), terms.end(), [](const Term& a, const Term& b) {
+                return std::tie(a.depth, a.is_neg, a.non_iv, a.order) <
+                       std::tie(b.depth, b.is_neg, b.non_iv, b.order);
+            });
+            int32_t const_c = static_cast<int32_t>(const_sum);
+            size_t old_inst_count = tree_indices.size();
+            if (terms.empty()) {
+                for (size_t idx : tree_indices) erased[idx] = true;
+                global_replace_map[root.dst] = std::to_string(const_c);
+                continue;
+            }
+            if (terms.size() == 1 && !terms[0].is_neg && terms[0].coeff == 1 && const_c == 0) {
+                for (size_t idx : tree_indices) erased[idx] = true;
+                global_replace_map[root.dst] = terms[0].var;
+                continue;
+            }
+            std::vector<IRInst> new_insts;
+            size_t new_sub_count = 0;
+            auto materialize = [&](const Term& t) -> std::string {
+                if (t.coeff == 1 || t.coeff == -1) return t.var;
+                if (t.coeff == (1 << 31)) {
+                    std::string tmp = new_reg();
+                    new_insts.push_back({IROp::MUL, tmp, t.var, std::to_string((1 << 31)), {}, {}});
+                    return tmp;
+                }
+                int32_t mag = t.is_neg ? -t.coeff : t.coeff;
+                std::string tmp = new_reg();
+                new_insts.push_back({IROp::MUL, tmp, t.var, std::to_string(mag), {}, {}});
+                return tmp;
+            };
+            std::string acc;
+            size_t start_k = 0;
+            if (!terms[0].is_neg) {
+                acc = materialize(terms[0]);
+                start_k = 1;
+                if (const_c != 0) {
+                    std::string tmp = new_reg();
+                    new_insts.push_back({IROp::ADD, tmp, acc, std::to_string(const_c), {}, {}});
+                    acc = tmp;
+                }
+            } else {
+                acc = std::to_string(const_c);
+                start_k = 0;
+            }
+            for (size_t k = start_k; k < terms.size(); ++k) {
+                std::string rhs = materialize(terms[k]);
+                std::string tmp = new_reg();
+                if (!terms[k].is_neg) {
+                    new_insts.push_back({IROp::ADD, tmp, acc, rhs, {}, {}});
+                } else {
+                    new_insts.push_back({IROp::SUB, tmp, acc, rhs, {}, {}});
+                    ++new_sub_count;
+                }
+                acc = tmp;
+            }
+            bool has_order_improvement = false;
+            if (old_inst_count >= 2) {
+                for (size_t k = 1; k < orig_var_ranks.size(); ++k) {
+                    if (orig_var_ranks[k] < orig_var_ranks[k - 1]) {
+                        has_order_improvement = true;
+                        break;
+                    }
+                }
+                if (saw_const && min_var_depth != 0x7fffffff && max_depth_before_const > min_var_depth) {
+                    has_order_improvement = true;
+                }
+            }
+            size_t new_inst_count = new_insts.size();
+            bool profitable =
+                (new_inst_count < old_inst_count) ||
+                (new_sub_count < old_sub_count && new_inst_count <= old_inst_count) ||
+                (has_order_improvement && new_inst_count == old_inst_count && new_sub_count <= old_sub_count);
+
+            if (!profitable || new_insts.empty()) continue;
+            new_insts.back().dst = root.dst;
+            for (size_t idx : tree_indices) erased[idx] = true;
+            replacements_at[i] = std::move(new_insts);
+        }
+        if (!replacements_at.empty() || std::any_of(erased.begin(), erased.end(), [](bool e) { return e; })) {
+            std::vector<IRInst> rebuilt;
+            rebuilt.reserve(M);
+            for (size_t idx = 0; idx < M; ++idx) {
+                auto rit = replacements_at.find(idx);
+                if (rit != replacements_at.end()) {
+                    for (auto& ni : rit->second) rebuilt.push_back(std::move(ni));
+                } else if (!erased[idx]) {
+                    rebuilt.push_back(std::move(insts[idx]));
+                }
+            }
+            insts = std::move(rebuilt);
+        }
+    }
+    if (!global_replace_map.empty()) {
+        auto resolve = [&](std::string& op) {
+            auto it = global_replace_map.find(op);
+            while (it != global_replace_map.end()) {
+                op = it->second;
+                it = global_replace_map.find(op);
+            }
+        };
+        for (int b = 0; b < N; ++b) {
+            if (!blocks[b].used) continue;
+            for (auto& inst : blocks[b].insts) {
+                if (inst.op == IROp::PHI) {
+                    for (auto& [lbl, val] : inst.phi_in) resolve(val);
+                } else {
+                    resolve(inst.src1);
+                    resolve(inst.src2);
+                    for (auto& arg : inst.args) resolve(arg);
+                }
             }
         }
     }
