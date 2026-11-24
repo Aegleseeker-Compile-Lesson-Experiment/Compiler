@@ -1628,7 +1628,7 @@ void run_linear_combine(std::vector<IRBlock>& blocks, const std::vector<int>& id
         }
         std::vector<bool> erased(M, false);
         std::unordered_map<size_t, std::vector<IRInst>> replacements_at;
-        for (size_t i = M; i > 0; i--) {
+        for (size_t i = M; i-- > 0;) {
             if (erased[i]) continue;
             const auto& root = insts[i];
             if (root.op != IROp::ADD && root.op != IROp::SUB) continue;
