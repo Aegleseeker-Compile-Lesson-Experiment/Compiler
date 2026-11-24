@@ -735,13 +735,22 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         return name == "main" || name == "toyc_entry" || !has_internal_caller.count(name);
     };
     std::unordered_map<std::string, std::vector<Range>> param_ranges;
+    std::unordered_map<std::string, std::vector<bool>> param_known;
     std::unordered_map<std::string, Range> ret_ranges;
     for (const auto& u : units) {
         size_t nparams = u.fn->params.size();
-        if (is_external_entry(u.fn->name)) {
-            param_ranges[u.fn->name] = std::vector<Range>(nparams, {I32_MIN, I32_MAX});
-        }
+        param_ranges[u.fn->name] = std::vector<Range>(nparams, {I32_MIN, I32_MAX});
+        bool ext = is_external_entry(u.fn->name);
+        param_known[u.fn->name] = std::vector<bool>(nparams, ext);
     }
+    auto all_params_known = [&](const std::string& name) -> bool {
+        auto it = param_known.find(name);
+        if (it == param_known.end()) return true;
+        for (bool k : it->second) {
+            if (!k) return false;
+        }
+        return true;
+    };
     auto analyze_one_func = [&](
         IRUnit& u,
         std::unordered_map<std::string, std::vector<Range>>& next_param_ranges,
@@ -758,7 +767,9 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         std::unordered_map<std::string, Range> ranges;
         if (param_ranges.count(u.fn->name)) {
             const auto& pr = param_ranges[u.fn->name];
+            const auto& pk = param_known[u.fn->name];
             for (size_t k = 0; k < u.fn->params.size() && k < pr.size(); ++k) {
+                if (!pk[k]) continue;
                 const std::string& raw_p = u.fn->params[k];
                 if (raw_p.empty()) continue;
                 std::string norm_p = (raw_p[0] == '%') ? raw_p : ("%" + raw_p);
@@ -1074,7 +1085,8 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
     };
     bool inter_changed = true;
     int outer_iter = 0;
-    while (inter_changed && outer_iter < 10) {
+    int max_outer_iter = std::max(12, static_cast<int>(units.size()) * 2 + 6);
+    while (inter_changed && outer_iter < max_outer_iter) {
         inter_changed = false;
         ++outer_iter;
         std::unordered_map<std::string, std::vector<Range>> next_param_ranges;
@@ -1082,31 +1094,35 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
         std::unordered_map<std::string, Range> next_ret_ranges;
         std::unordered_map<std::string, bool> ret_seen;
         for (auto& u : units) {
-            if (is_external_entry(u.fn->name)) {
-                next_param_ranges[u.fn->name] = std::vector<Range>(u.fn->params.size(), {I32_MIN, I32_MAX});
-            }
+            if (!all_params_known(u.fn->name)) continue;
             analyze_one_func(u, next_param_ranges, param_seen, next_ret_ranges, ret_seen);
         }
-        for (auto& [fname, new_vec] : next_param_ranges) {
-            auto it = param_ranges.find(fname);
-            if (it == param_ranges.end()) {
-                param_ranges[fname] = std::move(new_vec);
-                inter_changed = true;
-            } else {
-                for (size_t k = 0; k < new_vec.size(); ++k) {
-                    Range merged = union_range(it->second[k], new_vec[k]);
+        for (auto& [fname, seen_vec] : param_seen) {
+            auto& cur_vec = param_ranges[fname];
+            auto& known_vec = param_known[fname];
+            const auto& new_vec = next_param_ranges[fname];
+            for (size_t k = 0; k < seen_vec.size() && k < cur_vec.size(); ++k) {
+                if (!seen_vec[k]) continue;
+                if (!known_vec[k]) {
+                    cur_vec[k] = new_vec[k];
+                    known_vec[k] = true;
+                    inter_changed = true;
+                } else {
+                    Range merged = union_range(cur_vec[k], new_vec[k]);
                     if (outer_iter > 5) {
-                        if (merged.lo < it->second[k].lo) merged.lo = (merged.lo >= 0) ? 0 : I32_MIN;
-                        if (merged.hi > it->second[k].hi) merged.hi = I32_MAX;
+                        if (merged.lo < cur_vec[k].lo) merged.lo = (merged.lo >= 0) ? 0 : I32_MIN;
+                        if (merged.hi > cur_vec[k].hi) merged.hi = I32_MAX;
                     }
-                    if (!(it->second[k] == merged)) {
-                        it->second[k] = merged;
+                    if (!(cur_vec[k] == merged)) {
+                        cur_vec[k] = merged;
                         inter_changed = true;
                     }
                 }
             }
         }
-        for (auto& [fname, new_r] : next_ret_ranges) {
+        for (auto& [fname, seen] : ret_seen) {
+            if (!seen) continue;
+            const Range& new_r = next_ret_ranges[fname];
             auto it = ret_ranges.find(fname);
             if (it == ret_ranges.end()) {
                 ret_ranges[fname] = new_r;
@@ -1129,6 +1145,7 @@ void analyze_interprocedural_non_negative(std::vector<IRUnit>& units) {
     std::unordered_map<std::string, Range> dummy_r;
     std::unordered_map<std::string, bool> dummy_rs;
     for (auto& u : units) {
+        if (!all_params_known(u.fn->name)) continue;
         auto final_ranges = analyze_one_func(u, dummy_p, dummy_ps, dummy_r, dummy_rs);
         for (const auto& [var, r] : final_ranges) {
             if (r.lo >= 0) {
