@@ -119,7 +119,7 @@ void CodeGen::linear_scan_allocate(std::vector<LiveInterval>& intervals) {
         }
     };
     auto assign_spill = [&](LiveInterval& iv) {
-        res.spill_bytes += 4;
+        res.spill_bytes += 8;
         iv.spill_slot = res.spill_bytes;
         res.spill_slot[iv.reg] = iv.spill_slot;
     };
@@ -217,6 +217,51 @@ void CodeGen::emit_sw(const std::string& rs, int offset) {
 }
 
 void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
+    ptr_vregs.clear();
+    for (const auto& blk : blocks) {
+        for (const auto& inst : blk.insts) {
+            if (inst.op == IROp::ALLOCA_ARR || inst.op == IROp::GEP) {
+                if (!inst.dst.empty()) ptr_vregs.insert(inst.dst);
+            }
+            if (inst.op == IROp::GEP || inst.op == IROp::MEM_LOAD) {
+                if (!inst.src1.empty() && inst.src1[0] == '%') ptr_vregs.insert(inst.src1);
+            }
+            if (inst.op == IROp::MEM_STORE) {
+                if (!inst.src2.empty() && inst.src2[0] == '%') ptr_vregs.insert(inst.src2);
+            }
+        }
+    }
+    bool ptr_changed = true;
+    while (ptr_changed) {
+        ptr_changed = false;
+        for (const auto& blk : blocks) {
+            for (const auto& inst : blk.insts) {
+                if (inst.op == IROp::MOV && !inst.src1.empty() && inst.src1[0] == '%') {
+                    if (ptr_vregs.count(inst.src1) && !ptr_vregs.count(inst.dst)) {
+                        ptr_vregs.insert(inst.dst);
+                        ptr_changed = true;
+                    } else if (ptr_vregs.count(inst.dst) && !ptr_vregs.count(inst.src1)) {
+                        ptr_vregs.insert(inst.src1);
+                        ptr_changed = true;
+                    }
+                }
+            }
+        }
+    }
+    int used_top_bytes = 16 + 8 * static_cast<int>(alloc.used_callee_regs.size()) + alloc.spill_bytes;
+    int local_arr_bytes = 0;
+    std::unordered_map<std::string, int> arr_offset_map;
+    for (const auto& blk : blocks) {
+        for (const auto& inst : blk.insts) {
+            if (inst.op == IROp::ALLOCA_ARR) {
+                int bytes = std::stoi(inst.src1);
+                int aligned_bytes = (bytes + 7) & ~7;
+                local_arr_bytes += aligned_bytes;
+                arr_offset_map[inst.dst] = -(used_top_bytes + local_arr_bytes);
+            }
+        }
+    }
+
     int max_stack_args = 0;
     for (const auto& blk : blocks) {
         for (const auto& inst : blk.insts) {
@@ -225,7 +270,7 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
             }
         }
     }
-    int raw_size = 16 + 8 * static_cast<int>(alloc.used_callee_regs.size()) + alloc.spill_bytes + 8 * max_stack_args;
+    int raw_size = used_top_bytes + local_arr_bytes + 8 * max_stack_args;
     int frame_size = (raw_size + 15) & ~15;
     std::string epilogue_label = "Lret_" + func.name;
     insts.push_back(AsmInst{ "globl", "", "", "", 0, func.name });
@@ -258,7 +303,8 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
                 reg_param_moves.push_back({dst_reg, arg_reg});
             }
         } else if (alloc.spill_slot.count(p)) {
-            emit_sw(arg_reg, alloc.spill_slot[p]);
+            if (ptr_vregs.count(p)) emit_sd(arg_reg, alloc.spill_slot[p]);
+            else emit_sw(arg_reg, alloc.spill_slot[p]);
         }
     }
     while (!reg_param_moves.empty()) {
@@ -290,11 +336,18 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
         std::string p = func.params[i];
         if (!p.empty() && p[0] != '%') p = "%" + p;
         int caller_stack_off = static_cast<int>(i - 8) * 8;
+        bool is_ptr = ptr_vregs.count(p) > 0;
         if (alloc.reg_map.count(p)) {
-            emit_lw(alloc.reg_map[p], caller_stack_off);
+            if (is_ptr) emit_ld(alloc.reg_map[p], caller_stack_off);
+            else emit_lw(alloc.reg_map[p], caller_stack_off);
         } else if (alloc.spill_slot.count(p)) {
-            emit_lw("t5", caller_stack_off);
-            emit_sw("t5", alloc.spill_slot[p]);
+            if (is_ptr) {
+                emit_ld("t5", caller_stack_off);
+                emit_sd("t5", alloc.spill_slot[p]);
+            } else {
+                emit_lw("t5", caller_stack_off);
+                emit_sw("t5", alloc.spill_slot[p]);
+            }
         }
     }
     std::unordered_map<std::string, int> vreg_uses;
@@ -307,8 +360,8 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
     }
     auto is_icmp = [](IROp op) {
         return op == IROp::ICMP_EQ  || op == IROp::ICMP_NE  ||
-            op == IROp::ICMP_SLT || op == IROp::ICMP_SGT ||
-            op == IROp::ICMP_SLE || op == IROp::ICMP_SGE;
+               op == IROp::ICMP_SLT || op == IROp::ICMP_SGT ||
+               op == IROp::ICMP_SLE || op == IROp::ICMP_SGE;
     };
     for (size_t b = 0; b < blocks.size(); ++b) {
         const auto& block = blocks[b];
@@ -317,52 +370,120 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
         }
         for (size_t i = 0; i < block.insts.size(); ++i) {
             const auto& inst = block.insts[i];
-            if (i + 1 < block.insts.size() && is_icmp(inst.op) &&
-                block.insts[i + 1].op == IROp::BR_COND &&
-                block.insts[i + 1].src1 == inst.dst && vreg_uses[inst.dst] == 1) {
-                    const auto& br = block.insts[i + 1];
-                    std::string L_true = "." + func.name + "_" + br.dst;
-                    std::string L_false = "." + func.name + "_" + br.src2;
-                    if (inst.src2 == "0") {
-                        std::string r1 = use_operand(inst.src1, "t5");
-                        switch (inst.op) {
-                            case IROp::ICMP_EQ: insts.push_back({"beqz", "", r1, "", 0, L_true}); break;
-                            case IROp::ICMP_NE: insts.push_back({"bnez", "", r1, "", 0, L_true}); break;
-                            case IROp::ICMP_SLT: insts.push_back({"bltz", "", r1, "", 0, L_true}); break;
-                            case IROp::ICMP_SGE: insts.push_back({"bgez", "", r1, "", 0, L_true}); break;
-                            case IROp::ICMP_SGT: insts.push_back({"bgtz", "", r1, "", 0, L_true}); break;
-                            case IROp::ICMP_SLE: insts.push_back({"blez", "", r1, "", 0, L_true}); break;
-                            default: break;
-                        }
-                    } else if (inst.src1 == "0") {
-                        std::string r2 = use_operand(inst.src2, "t5");
-                        switch (inst.op) {
-                            case IROp::ICMP_EQ: insts.push_back({"beqz", "", r2, "", 0, L_true}); break;
-                            case IROp::ICMP_NE: insts.push_back({"bnez", "", r2, "", 0, L_true}); break;
-                            case IROp::ICMP_SLT: insts.push_back({"bgtz", "", r2, "", 0, L_true}); break;
-                            case IROp::ICMP_SGE: insts.push_back({"blez", "", r2, "", 0, L_true}); break;
-                            case IROp::ICMP_SGT: insts.push_back({"bltz", "", r2, "", 0, L_true}); break;
-                            case IROp::ICMP_SLE: insts.push_back({"bgez", "", r2, "", 0, L_true}); break;
-                            default: break;
-                        }
-                    } else {
-                        std::string r1 = use_operand(inst.src1, "t5");
-                        std::string r2 = use_operand(inst.src2, "t6");
-                        switch (inst.op) {
-                            case IROp::ICMP_EQ: insts.push_back({"beq", "", r1, r2, 0, L_true}); break;
-                            case IROp::ICMP_NE: insts.push_back({"bne", "", r1, r2, 0, L_true}); break;
-                            case IROp::ICMP_SLT: insts.push_back({"blt", "", r1, r2, 0, L_true}); break;
-                            case IROp::ICMP_SGE: insts.push_back({"bge", "", r1, r2, 0, L_true}); break;
-                            case IROp::ICMP_SGT: insts.push_back({"blt", "", r2, r1, 0, L_true}); break;
-                            case IROp::ICMP_SLE: insts.push_back({"bge", "", r2, r1, 0, L_true}); break;
-                            default: break;
-                        }
+            if (i + 1 < block.insts.size() && is_icmp(inst.op) && block.insts[i + 1].op == IROp::BR_COND && block.insts[i + 1].src1 == inst.dst && vreg_uses[inst.dst] == 1) {
+                const auto& br = block.insts[i + 1];
+                std::string L_true = "." + func.name + "_" + br.dst;
+                std::string L_false = "." + func.name + "_" + br.src2;
+                if (inst.src2 == "0") {
+                    std::string r1 = use_operand(inst.src1, "t5");
+                    switch (inst.op) {
+                        case IROp::ICMP_EQ:  insts.push_back({"beqz", "", r1, "", 0, L_true}); break;
+                        case IROp::ICMP_NE:  insts.push_back({"bnez", "", r1, "", 0, L_true}); break;
+                        case IROp::ICMP_SLT: insts.push_back({"bltz", "", r1, "", 0, L_true}); break;
+                        case IROp::ICMP_SGE: insts.push_back({"bgez", "", r1, "", 0, L_true}); break;
+                        case IROp::ICMP_SGT: insts.push_back({"bgtz", "", r1, "", 0, L_true}); break;
+                        case IROp::ICMP_SLE: insts.push_back({"blez", "", r1, "", 0, L_true}); break;
+                        default: break;
                     }
-                    insts.push_back({"j", "", "", "", 0, L_false});
-                    ++i;
-                    continue;
+                } else if (inst.src1 == "0") {
+                    std::string r2 = use_operand(inst.src2, "t5");
+                    switch (inst.op) {
+                        case IROp::ICMP_EQ:  insts.push_back({"beqz", "", r2, "", 0, L_true}); break;
+                        case IROp::ICMP_NE:  insts.push_back({"bnez", "", r2, "", 0, L_true}); break;
+                        case IROp::ICMP_SLT: insts.push_back({"bgtz", "", r2, "", 0, L_true}); break;
+                        case IROp::ICMP_SGE: insts.push_back({"blez", "", r2, "", 0, L_true}); break;
+                        case IROp::ICMP_SGT: insts.push_back({"bltz", "", r2, "", 0, L_true}); break;
+                        case IROp::ICMP_SLE: insts.push_back({"bgez", "", r2, "", 0, L_true}); break;
+                        default: break;
+                    }
+                } else {
+                    std::string r1 = use_operand(inst.src1, "t5");
+                    std::string r2 = use_operand(inst.src2, "t6");
+                    switch (inst.op) {
+                        case IROp::ICMP_EQ:  insts.push_back({"beq", "", r1, r2, 0, L_true}); break;
+                        case IROp::ICMP_NE:  insts.push_back({"bne", "", r1, r2, 0, L_true}); break;
+                        case IROp::ICMP_SLT: insts.push_back({"blt", "", r1, r2, 0, L_true}); break;
+                        case IROp::ICMP_SGE: insts.push_back({"bge", "", r1, r2, 0, L_true}); break;
+                        case IROp::ICMP_SGT: insts.push_back({"blt", "", r2, r1, 0, L_true}); break;
+                        case IROp::ICMP_SLE: insts.push_back({"bge", "", r2, r1, 0, L_true}); break;
+                        default: break;
+                    }
+                }
+                insts.push_back({"j", "", "", "", 0, L_false});
+                ++i;
+                continue;
+            }
+            if (inst.op == IROp::GEP && i + 1 < block.insts.size() && vreg_uses[inst.dst] == 1 && !inst.src2.empty() && inst.src2[0] != '%') {
+                int64_t off = std::stoll(inst.src2);
+                const auto& next = block.insts[i + 1];
+                if (off >= -2048 && off <= 2047) {
+                    if (next.op == IROp::MEM_LOAD && next.src1 == inst.dst) {
+                        std::string r_base = use_operand(inst.src1, "t5");
+                        std::string rd = def_operand(next.dst, "t5");
+                        insts.push_back({"lw", rd, r_base, "", static_cast<int>(off), ""});
+                        commit_dst(next.dst, "t5");
+                        ++i;
+                        continue;
+                    } else if (next.op == IROp::MEM_STORE && next.src2 == inst.dst && next.src1 != inst.dst) {
+                        std::string r_val = use_operand(next.src1, "t5");
+                        std::string r_base = use_operand(inst.src1, "t6");
+                        insts.push_back({"sw", "", r_base, r_val, static_cast<int>(off), ""});
+                        ++i;
+                        continue;
+                    }
+                }
             }
             switch (inst.op) {
+                case IROp::ALLOCA_ARR: {
+                    int off = arr_offset_map[inst.dst];
+                    std::string rd = def_operand(inst.dst, "t5");
+                    if (off >= -2048 && off <= 2047) {
+                        insts.push_back({"addi", rd, "s0", "", off, ""});
+                    } else {
+                        insts.push_back({"li", "t6", "", "", off, ""});
+                        insts.push_back({"add", rd, "s0", "t6", 0, ""});
+                    }
+                    commit_dst(inst.dst, "t5");
+                    break;
+                }
+                case IROp::GEP: {
+                    std::string r_base = use_operand(inst.src1, "t5");
+                    if (!inst.src2.empty() && inst.src2[0] != '%') {
+                        int64_t off = std::stoll(inst.src2);
+                        std::string rd = def_operand(inst.dst, "t5");
+                        if (off == 0) {
+                            if (rd != r_base) {
+                                insts.push_back({"mv", rd, r_base, "", 0, ""});
+                            }
+                        } else if (off >= -2048 && off <= 2047) {
+                            insts.push_back({"addi", rd, r_base, "", static_cast<int>(off), ""});
+                        } else {
+                            insts.push_back({"li", "t6", "", "", static_cast<int>(off), ""});
+                            insts.push_back({"add", rd, r_base, "t6", 0, ""});
+                        }
+                        commit_dst(inst.dst, "t5");
+                    } else {
+                        std::string r_off = use_operand(inst.src2, "t6");
+                        std::string rd = def_operand(inst.dst, "t5");
+                        insts.push_back({"sext.w", "t6", r_off, "", 0, ""});
+                        insts.push_back({"add", rd, r_base, "t6", 0, ""});
+                        commit_dst(inst.dst, "t5");
+                    }
+                    break;
+                }
+                case IROp::MEM_LOAD: {
+                    std::string r_addr = use_operand(inst.src1, "t5");
+                    std::string rd = def_operand(inst.dst, "t5");
+                    insts.push_back({"lw", rd, r_addr, "", 0, ""});
+                    commit_dst(inst.dst, "t5");
+                    break;
+                }
+                case IROp::MEM_STORE: {
+                    std::string r_val = use_operand(inst.src1, "t5");
+                    std::string r_addr = use_operand(inst.src2, "t6");
+                    insts.push_back({"sw", "", r_addr, r_val, 0, ""});
+                    break;
+                }
                 case IROp::ADD: {
                     bool c1 = !inst.src1.empty() && inst.src1[0] != '%';
                     bool c2 = !inst.src2.empty() && inst.src2[0] != '%';
@@ -496,7 +617,8 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
                         std::string rs = use_operand(inst.src1, "t5");
                         std::string rd = def_operand(inst.dst, "t5");
                         if (rd != rs) {
-                            insts.push_back({"sext.w", rd, rs, "", 0, ""});
+                            bool is_ptr = ptr_vregs.count(inst.dst) || ptr_vregs.count(inst.src1);
+                            insts.push_back({is_ptr ? "mv" : "sext.w", rd, rs, "", 0, ""});
                         }
                         commit_dst(inst.dst, "t5");
                     }
@@ -516,12 +638,13 @@ void CodeGen::gen_func(const std::vector<IRBlock>& blocks, const IRFunc& func) {
                     for (size_t k = 8; k < inst.args.size(); ++k) {
                         std::string val_reg = use_operand(inst.args[k], "t5");
                         int sp_offset = static_cast<int>(k - 8) * 8;
+                        const char* store_op = ptr_vregs.count(inst.args[k]) ? "sd" : "sw";
                         if (sp_offset <= 2047) {
-                            insts.push_back({"sw", "", "sp", val_reg, sp_offset, ""});
+                            insts.push_back({store_op, "", "sp", val_reg, sp_offset, ""});
                         } else {
                             insts.push_back({"li", "t6", "", "", sp_offset, ""});
                             insts.push_back({"add", "t6", "sp", "t6", 0, ""});
-                            insts.push_back({"sw", "", "t6", val_reg, 0, ""});
+                            insts.push_back({store_op, "", "t6", val_reg, 0, ""});
                         }
                     }
                     std::vector<std::pair<std::string, std::string>> arg_moves;
@@ -586,7 +709,11 @@ std::string CodeGen::use_operand(const std::string& op, const std::string& scrat
     if (alloc.reg_map.count(op)) {
         return alloc.reg_map[op];
     }
-    emit_lw(scratch, alloc.spill_slot[op]);
+    if (ptr_vregs.count(op)) {
+        emit_ld(scratch, alloc.spill_slot[op]);
+    } else {
+        emit_lw(scratch, alloc.spill_slot[op]);
+    }
     return scratch;
 }
 
@@ -599,7 +726,11 @@ std::string CodeGen::def_operand(const std::string& dst, const std::string& scra
 
 void CodeGen::commit_dst(const std::string& dst, const std::string& scratch) {
     if (!alloc.reg_map.count(dst)) {
-        emit_sw(scratch, alloc.spill_slot[dst]);
+        if (ptr_vregs.count(dst)) {
+            emit_sd(scratch, alloc.spill_slot[dst]);
+        } else {
+            emit_sw(scratch, alloc.spill_slot[dst]);
+        }
     }
 }
 
@@ -645,8 +776,10 @@ void CodeGen::emit_parallel_moves(const std::vector<std::pair<std::string, std::
         }
     }
     for (const auto& task : other_moves) {
-        if (task.raw_src[0] != '%') {
+        if (!task.raw_src.empty() && task.raw_src[0] != '%') {
             insts.push_back({"li", task.dst_reg, "", "", std::stoi(task.raw_src), ""});
+        } else if (ptr_vregs.count(task.raw_src)) {
+            emit_ld(task.dst_reg, alloc.spill_slot[task.raw_src]);
         } else {
             emit_lw(task.dst_reg, alloc.spill_slot[task.raw_src]);
         }

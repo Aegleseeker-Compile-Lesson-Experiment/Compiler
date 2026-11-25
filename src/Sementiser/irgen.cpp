@@ -11,7 +11,7 @@ std::vector<std::string> get_defs(const IRInst& inst) {
         case IROp::ICMP_EQ: case IROp::ICMP_NE:
         case IROp::ICMP_SLT: case IROp::ICMP_SGT:
         case IROp::ICMP_SLE: case IROp::ICMP_SGE:
-        case IROp::MOV: case IROp::LOAD:
+        case IROp::MOV: case IROp::LOAD: case IROp::ALLOCA_ARR: case IROp::GEP: case IROp::MEM_LOAD:
             if (is_vreg(inst.dst)) return {inst.dst};
             break;
         case IROp::CALL:
@@ -41,9 +41,12 @@ std::vector<std::string> get_uses(const IRInst& inst) {
         case IROp::BR_COND:
         case IROp::RET:
         case IROp::LOAD:
+        case IROp::MEM_LOAD:
             add_if_vreg(inst.src1);
             break;
         case IROp::STORE:
+        case IROp::MEM_STORE:
+        case IROp::GEP:
             add_if_vreg(inst.src1);
             add_if_vreg(inst.src2);
             break;

@@ -1,10 +1,158 @@
 #include "sementiser.h"
 
+namespace {
+    struct ArrayMeta {
+        std::vector<int> dims;
+        std::vector<int> strides;
+        bool is_param = false;
+        std::vector<int> const_vals;
+    };
+    struct FuncParamMeta {
+        bool is_array = false;
+        std::vector<int> dims;
+    };
+    std::unordered_map<std::string, ArrayMeta> array_meta_map;
+    std::unordered_map<std::string, std::vector<FuncParamMeta>> func_param_map;
+    std::vector<int> compute_strides(const std::vector<int>& dims) {
+        std::vector<int> strides(dims.size(), 4);
+        for (int i = static_cast<int>(dims.size()) - 2; i >= 0; --i) {
+            strides[i] = strides[i + 1] * dims[i + 1];
+        }
+        return strides;
+    }
+    void flatten_init_list(
+        Sementiser* self,
+        ASTNode* init_node,
+        Block* block,
+        const std::vector<int>& dims,
+        size_t dim_idx,
+        std::vector<std::string>& flat_vals,
+        std::vector<int>& flat_const_vals,
+        bool& all_const) {
+        int sub_cap = 1;
+        for (size_t i = dim_idx; i < dims.size(); ++i) {
+            sub_cap *= dims[i];
+        }
+        if (init_node->type != NodeType::INITVALLIST) {
+            std::string val = self->dfs_op(init_node, block);
+            flat_vals.push_back(val);
+            if (init_node->has_const_value) {
+                flat_const_vals.push_back(init_node->const_value);
+            } else {
+                flat_const_vals.push_back(0);
+                all_const = false;
+            }
+            return;
+        }
+        size_t start_sz = flat_vals.size();
+        int elem_stride = (dim_idx + 1 < dims.size()) ? (sub_cap / dims[dim_idx]) : 1;
+        for (ASTNode* item : init_node->children) {
+            if (static_cast<int>(flat_vals.size() - start_sz) >= sub_cap) {
+                self->add_error_message(item->line, "Excess elements in array initializer.");
+                break;
+            }
+            if (item->type == NodeType::INITVALLIST) {
+                if (dim_idx + 1 >= dims.size()) {
+                    self->add_error_message(item->line, "Too many braces in scalar initializer.");
+                    continue;
+                }
+                int offset = static_cast<int>(flat_vals.size() - start_sz);
+                int rem = offset % elem_stride;
+                if (rem != 0) {
+                    int pad = elem_stride - rem;
+                    flat_vals.insert(flat_vals.end(), pad, "0");
+                    flat_const_vals.insert(flat_const_vals.end(), pad, 0);
+                }
+                flatten_init_list(self, item, block, dims, dim_idx + 1, flat_vals, flat_const_vals, all_const);
+            } else {
+                std::string val = self->dfs_op(item, block);
+                flat_vals.push_back(val);
+                if (item->has_const_value) {
+                    flat_const_vals.push_back(item->const_value);
+                } else {
+                    flat_const_vals.push_back(0);
+                    all_const = false;
+                }
+            }
+        }
+        int filled = static_cast<int>(flat_vals.size() - start_sz);
+        if (filled < sub_cap) {
+            int pad = sub_cap - filled;
+            flat_vals.insert(flat_vals.end(), pad, "0");
+            flat_const_vals.insert(flat_const_vals.end(), pad, 0);
+        }
+    }
+    struct LValAddrResult {
+        std::string addr_reg;
+        size_t idx_cnt = 0;
+        bool all_idx_const = true;
+        int flat_const_idx = 0;
+    };
+    LValAddrResult eval_array_lval_addr(
+        Sementiser* self,
+        IRGenerator& ir,
+        ASTNode* lval,
+        Block* block,
+        const TableSymbol* sym,
+        const ArrayMeta& meta) {
+        LValAddrResult out;
+        out.idx_cnt = lval->children.size() - 1;
+        if (out.idx_cnt > meta.dims.size()) {
+            self->add_error_message(lval->line, "Subscripted value is not an array.");
+        }
+        std::string offset_op = "0";
+        for (size_t j = 0; j < out.idx_cnt && j < meta.dims.size(); ++j) {
+            ASTNode* idx_node = lval->children[j + 1];
+            std::string idx_val = self->dfs_op(idx_node, block);
+            int stride = meta.strides[j];
+            if (idx_node->has_const_value) {
+                out.flat_const_idx += idx_node->const_value * (stride / 4);
+            } else {
+                out.all_idx_const = false;
+            }
+            std::string term;
+            if (idx_node->has_const_value) {
+                long long byte_c = static_cast<long long>(idx_node->const_value) * stride;
+                term = std::to_string(byte_c);
+            } else if (stride == 1) {
+                term = idx_val;
+            } else {
+                term = ir.new_reg();
+                ir.emit(term + " = mul i32 " + idx_val + ", " + std::to_string(stride));
+                ir.emit_inst({IROp::MUL, term, idx_val, std::to_string(stride), {}, {}});
+            }
+            if (offset_op == "0") {
+                offset_op = term;
+            } else if (term != "0") {
+                if (offset_op[0] != '%' && term[0] != '%') {
+                    offset_op = std::to_string(std::stoll(offset_op) + std::stoll(term));
+                } else {
+                    auto next_off = ir.new_reg();
+                    ir.emit(next_off + " = add i32 " + offset_op + ", " + term);
+                    ir.emit_inst({IROp::ADD, next_off, offset_op, term, {}, {}});
+                    offset_op = next_off;
+                }
+            }
+        }
+        if (out.idx_cnt == 0) {
+            out.addr_reg = sym->ptr_name;
+        } else {
+            out.addr_reg = ir.new_reg();
+            ir.emit(out.addr_reg + " = getelementptr i8, ptr " + sym->ptr_name + ", i32 " + offset_op);
+            ir.emit_inst({IROp::GEP, out.addr_reg, sym->ptr_name, offset_op, {}, {}});
+        }
+        return out;
+    }
+}
+
 std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) {
     auto root = Global::ASTRoot;
     rootBlock = Block{{}, 0, nullptr};
+    func_param_map.clear();
     functions.push_back(Func{FuncType::INT, "getint", {}});
     functions.push_back(Func{FuncType::VOID, "putint", {"a"}});
+    func_param_map["getint"] = {};
+    func_param_map["putint"] = {{false, {}}};
     std::ostringstream module_ir;
     for (auto &function : root->children) {
         module_ir << dfs_func(function, &rootBlock);
@@ -12,9 +160,6 @@ std::vector<std::pair<int, std::string>> Sementiser::check_error(bool gen_code) 
     std::ofstream ir_file("output.ll");
     ir_file << module_ir.str();
     ir_file.close();
-    // std::ofstream cg_file("test.s");
-    // cg_file << cg.generate(functions_ir);
-    // cg_file.close();
     for (auto& ir_fn : functions_ir) {
         eliminate_tail_recursion(ir_fn);
         optimize_ir(ir_fn.insts);
@@ -88,6 +233,10 @@ Func Sementiser::find_in_functions(std::string function) {
 }
 
 void Sementiser::dfs_block(ASTNode *node, Block *block) {
+    if (node->children.empty()) {
+        node->has_return = false;
+        return;
+    }
     dfs_stmt_list(node->children[0], block);
     node->has_return = node->children[0]->has_return;
 }
@@ -110,55 +259,112 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         dfs_block(node, _);
         delete _;
     } else if (node->type == NodeType::VARDEC_STMT) {
-        for (const auto& node : node->children[0]->children) {
+        for (const auto& def : node->children[0]->children) {
             TableSymbol temp;
-            temp.name = node->children[0]->text;
+            temp.name = def->children[0]->text;
             temp.type = DataType::INT;
-            temp.is_const = node->has_const_value;
+            temp.is_const = def->has_const_value;
             temp.may_have_been_changed = false;
             auto res = find_in_block(temp, block);
-            auto ptr = "%" + node->children[0]->text + ".addr_" + std::to_string(ir.reg_id++);
-            temp.ptr_name = ptr;
-            ir.entry_allocas << "  " << ptr << " = alloca i32\n";
-            ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
             if (res->name != "") {
-                add_error_message(node->line, "Symbol has been used in current scope.");
+                add_error_message(def->line, "Symbol has been used in current scope.");
             } else {
                 delete res;
             }
-            if (node->type == NodeType::DECASSIGN_DEF) {
-                auto init_val = dfs_op(node->children[1], block);
-                ir.emit("store i32 " + init_val + ", ptr " + ptr);
-                ir.emit_inst({IROp::STORE, "", init_val, ptr, {}, {}});
-                temp.initial_value = node->children[1]->const_value;
-                temp.may_have_been_changed = !node->children[1]->has_const_value;
-            }
-            if (node->type == NodeType::DEC_ARRAY_DEF) {
-                // todo: 数组声明
-            }
-            if (node->type == NodeType::DECASSIGN_ARRAY_DEF) {
-                // todo: 数组声明与初始化
+            if (def->type == NodeType::DEC_ARRAY_DEF || def->type == NodeType::DECASSIGN_ARRAY_DEF) {
+                std::vector<int> dims;
+                long long total_elems = 1;
+                for (ASTNode* dim_node : def->children[1]->children) {
+                    int d = dim_node->const_value;
+                    if (d <= 0) {
+                        add_error_message(dim_node->line, "Array size must be positive.");
+                        d = 1;
+                    }
+                    dims.push_back(d);
+                    total_elems *= d;
+                }
+                int total_bytes = static_cast<int>(total_elems * 4);
+                auto ptr = "%" + temp.name + ".addr_" + std::to_string(ir.reg_id++);
+                temp.ptr_name = ptr;
+                temp.may_have_been_changed = !temp.is_const;
+                ir.entry_allocas << "  " << ptr << " = alloca [" << total_elems << " x i32]\n";
+                ir.entry_allocas_insts.push_back({IROp::ALLOCA_ARR, ptr, std::to_string(total_bytes), "", {}, {}});
+                ArrayMeta meta;
+                meta.dims = dims;
+                meta.strides = compute_strides(dims);
+                meta.is_param = false;
+                if (def->type == NodeType::DECASSIGN_ARRAY_DEF) {
+                    std::vector<std::string> flat_vals;
+                    std::vector<int> flat_const_vals;
+                    bool all_const = true;
+                    flatten_init_list(this, def->children[2], block, dims, 0, flat_vals, flat_const_vals, all_const);
+                    if (temp.is_const && !all_const) {
+                        add_error_message(def->line, "Const array initializer must be constant.");
+                    }
+                    for (int idx = 0; idx < static_cast<int>(flat_vals.size()); ++idx) {
+                        auto elem_addr = ir.new_reg();
+                        std::string byte_off = std::to_string(idx * 4);
+                        ir.emit(elem_addr + " = getelementptr i8, ptr " + ptr + ", i32 " + byte_off);
+                        ir.emit_inst({IROp::GEP, elem_addr, ptr, byte_off, {}, {}});
+                        ir.emit("store i32 " + flat_vals[idx] + ", ptr " + elem_addr);
+                        ir.emit_inst({IROp::MEM_STORE, "", flat_vals[idx], elem_addr, {}, {}});
+                    }
+                    if (temp.is_const) {
+                        meta.const_vals = std::move(flat_const_vals);
+                    }
+                }
+                array_meta_map[ptr] = std::move(meta);
+            } else {
+                auto ptr = "%" + temp.name + ".addr_" + std::to_string(ir.reg_id++);
+                temp.ptr_name = ptr;
+                ir.entry_allocas << "  " << ptr << " = alloca i32\n";
+                ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
+                if (def->type == NodeType::DECASSIGN_DEF) {
+                    auto init_val = dfs_op(def->children[1], block);
+                    ir.emit("store i32 " + init_val + ", ptr " + ptr);
+                    ir.emit_inst({IROp::STORE, "", init_val, ptr, {}, {}});
+                    temp.initial_value = def->children[1]->const_value;
+                    temp.may_have_been_changed = !def->children[1]->has_const_value;
+                }
             }
             block->SymbolTable.push_back(temp);
         }
     } else if (node->type == NodeType::ASSIGN_STMT) {
+        ASTNode* lval = node->children[0];
+        ASTNode* ident_node = (lval->type == NodeType::LVAL) ? lval->children[0] : lval;
         TableSymbol temp;
-        temp.name = node->children[0]->text;
+        temp.name = ident_node->text;
         auto res = find_in_blocks(temp, block);
         if (res->name == "") {
             add_error_message(node->line, "Symbol not declared before.");
+            dfs_op(node->children[1], block);
             delete res;
+            return;
+        }
+        if (res->is_const) {
+            add_error_message(ident_node->line, "Const value should not be changed.");
+        }
+        auto arr_it = array_meta_map.find(res->ptr_name);
+        if (arr_it != array_meta_map.end()) {
+            const auto& meta = arr_it->second;
+            auto addr_res = eval_array_lval_addr(this, ir, lval, block, res, meta);
+            if (addr_res.idx_cnt != meta.dims.size()) {
+                add_error_message(lval->line, "Cannot assign to an array sub-object.");
+            }
+            auto val = dfs_op(node->children[1], block);
+            ir.emit("store i32 " + val + ", ptr " + addr_res.addr_reg);
+            ir.emit_inst({IROp::MEM_STORE, "", val, addr_res.addr_reg, {}, {}});
         } else {
-            if (res->is_const == true) {
-                add_error_message(node->children[0]->line, "Const value should not be changed.");
+            if (lval->type == NodeType::LVAL && lval->children.size() > 1) {
+                add_error_message(lval->line, "Subscripted value is not an array.");
             }
             res->type = DataType::INT;
+            auto val = dfs_op(node->children[1], block);
+            res->may_have_been_changed = !node->children[1]->has_const_value;
+            res->initial_value = node->children[1]->const_value;
+            ir.emit("store i32 " + val + ", ptr " + res->ptr_name);
+            ir.emit_inst({IROp::STORE, "", val, res->ptr_name, {}, {}});
         }
-        auto val = dfs_op(node->children[1], block);
-        res->may_have_been_changed = !node->children[1]->has_const_value;
-        res->initial_value = node->children[1]->const_value;
-        ir.emit("store i32 " + val + ", ptr " + res->ptr_name);
-        ir.emit_inst({IROp::STORE, "", val, res->ptr_name, {}, {}});
     } else if (node->type == NodeType::IF_STMT) {
         auto then_label = ir.new_label();
         auto end_label = ir.new_label();
@@ -271,8 +477,8 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         if (node->children.empty()) {
             if (functions.back().type != FuncType::VOID) {
                 add_error_message(node->line, "Return void but function returns int.");
-                ir.emit("ret void");
             }
+            ir.emit("ret void");
             ir.emit_inst({IROp::RET, "", "", "", {}, {}});
         } else {
             if (functions.back().type != FuncType::INT) {
@@ -301,33 +507,9 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
             ir.block_terminated = true;
         }
     } else if (node->type == NodeType::FUNC_CALL) {
-        auto func = find_in_functions(node->children[0]->text);
-        if (func.type == FuncType::NOTFOUND) {
-            add_error_message(node->children[0]->line, "Function not defined.");
-        } else if ((!func.parameters.empty() && (node->children.size() == 1 || func.parameters.size() != node->children[1]->children.size())) ||
-            (func.parameters.empty() && node->children.size() != 1)) {
-            add_error_message(node->children[0]->line, "Number of function parameters not matched.");
-        }
-        std::vector<std::string> args;
-        if (!func.parameters.empty() && node->children.size() != 1) {
-            args = dfs_func_rparams(node->children[1], block);
-        }
-        std::string arg_str;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (i > 0) arg_str += ", ";
-            arg_str += "i32 " + args[i];
-        }
-        if (func.type == FuncType::VOID) {
-            ir.emit("call void @" + func.name + "(" + arg_str + ")");
-            ir.emit_inst({IROp::CALL, "", func.name, "", args, {}});
-        } else {
-            auto reg = ir.new_reg();
-            ir.emit(reg + " = call i32 @" + func.name + "(" + arg_str + ")");
-            ir.emit_inst({IROp::CALL, reg, func.name, "", args, {}});
-        }
-    } else {
-        // EMPTY_STMT
-        /* Nothing */
+        dfs_op(node, block);
+    } else if (node->type != NodeType::EMPTY_STMT) {
+        dfs_op(node, block);
     }
 }
 
@@ -340,6 +522,7 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     ir.body_insts.clear();
     ir.reg_id = 0;
     ir.block_terminated = false;
+    array_meta_map.clear();
     Func temp;
     temp.type = node->children[0]->data_type == DataType::INT ? FuncType::INT : FuncType::VOID;
     temp.name = node->children[1]->text;
@@ -353,8 +536,10 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     }
     block->SymbolTable.clear();
     std::string param_sig;
+    std::vector<FuncParamMeta> pmeta_list;
     if (node->children.size() == 3) {
         functions.push_back(temp);
+        func_param_map[temp.name] = {};
         dfs_block(node->children[2], block);
         if (node->children[0]->data_type == DataType::INT && !node->children[2]->has_return) {
             add_error_message(node->children[2]->line, "Function may return nothing.");
@@ -362,7 +547,6 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     } else {
         bool first_p = true;
         for (const auto &parameter : node->children[2]->children) {
-            // todo: 增加函数参数
             auto p_name = parameter->children[0]->text;
             auto param_reg = "%" + p_name;
             ir_fn.params.push_back(param_reg);
@@ -371,16 +555,41 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
             } else {
                 param_sig += ", ";
             }
-            param_sig += "i32 %" + p_name;
-            auto ptr = "%" + p_name + ".addr_" + std::to_string(ir.reg_id++);
-            ir.entry_allocas << "  " << ptr << " = alloca i32\n";
-            ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
-            ir.emit("store i32 %" + p_name + ", ptr " + ptr);
-            ir.emit_inst({IROp::STORE, "", param_reg, ptr, {}, {}});
-            block->SymbolTable.push_back(TableSymbol(DataType::INT, p_name, ptr, 0, false, true));
+            if (parameter->type == NodeType::ARRAYPARAM) {
+                param_sig += "ptr " + param_reg;
+                std::vector<int> dims = {-1};
+                if (parameter->children.size() > 1) {
+                    for (ASTNode* dim_node : parameter->children[1]->children) {
+                        int d = dim_node->const_value;
+                        if (d <= 0) {
+                            add_error_message(dim_node->line, "Array parameter dimension must be positive.");
+                            d = 1;
+                        }
+                        dims.push_back(d);
+                    }
+                }
+                ArrayMeta meta;
+                meta.dims = dims;
+                meta.strides = compute_strides(dims);
+                meta.is_param = true;
+                array_meta_map[param_reg] = std::move(meta);
+                block->SymbolTable.push_back(TableSymbol(DataType::INT, p_name, param_reg, 0, false, true));
+                pmeta_list.push_back({true, dims});
+            } else {
+                param_sig += "i32 " + param_reg;
+                auto ptr = "%" + p_name + ".addr_" + std::to_string(ir.reg_id++);
+                ir.entry_allocas << "  " << ptr << " = alloca i32\n";
+                ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
+                ir.emit("store i32 " + param_reg + ", ptr " + ptr);
+                ir.emit_inst({IROp::STORE, "", param_reg, ptr, {}, {}});
+
+                block->SymbolTable.push_back(TableSymbol(DataType::INT, p_name, ptr, 0, false, true));
+                pmeta_list.push_back({false, {}});
+            }
             temp.parameters.push_back(p_name);
         }
         functions.push_back(temp);
+        func_param_map[temp.name] = std::move(pmeta_list);
         dfs_block(node->children[3], block);
         if (node->children[0]->data_type == DataType::INT && !node->children[3]->has_return) {
             add_error_message(node->children[3]->line, "Function may return nothing.");
@@ -396,7 +605,8 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
         }
     }
     std::ostringstream full_func;
-    full_func << "define " << (node->children[0]->data_type == DataType::INT ? "i32" : "void") << " @" << node->children[1]->text << "(" << param_sig << ") {\n";
+    full_func << "define " << (node->children[0]->data_type == DataType::INT ? "i32" : "void")
+              << " @" << node->children[1]->text << "(" << param_sig << ") {\n";
     full_func << "entry:\n";
     full_func << ir.entry_allocas.str();
     full_func << ir.ir_body.str();
@@ -415,11 +625,6 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
                 add_error_message(node->children[0]->line, "Function not defined.");
             }
         }
-        if (func.type == FuncType::VOID) {
-            if (!block_error) {
-                add_error_message(node->children[0]->line, "Function returns void but used as value.");
-            }
-        }
         if ((!func.parameters.empty() && (node->children.size() == 1 || func.parameters.size() != node->children[1]->children.size())) ||
             (func.parameters.empty() && node->children.size() != 1)) {
             if (!block_error) {
@@ -431,10 +636,12 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
             args = dfs_func_rparams(node->children[1], block);
         }
         node->has_const_value = false;
+        const auto& expected_params = func_param_map[func.name];
         std::string arg_str;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) arg_str += ", ";
-            arg_str += "i32 " + args[i];
+            bool is_ptr_arg = (i < expected_params.size() && expected_params[i].is_array);
+            arg_str += (is_ptr_arg ? "ptr " : "i32 ") + args[i];
         }
         if (func.type == FuncType::VOID) {
             ir.emit("call void @" + func.name + "(" + arg_str + ")");
@@ -448,32 +655,59 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
         }
     } else if (node->type == NodeType::CONST_INT) {
         return std::to_string(node->const_value);
-    } else if (node->type == NodeType::IDENT) {
+    } else if (node->type == NodeType::LVAL || node->type == NodeType::IDENT) {
+        ASTNode* ident_node = (node->type == NodeType::LVAL) ? node->children[0] : node;
         TableSymbol temp;
-        temp.name = node->text;
+        temp.name = ident_node->text;
         auto res = find_in_blocks(temp, block);
         if (res->name == "") {
             if (!block_error) {
-                add_error_message(node->line, "Symbol not declared before.");
+                add_error_message(ident_node->line, "Symbol not declared before.");
             }
             delete res;
+            return "0";
         }
-        if (res->may_have_been_changed) {
+        auto arr_it = array_meta_map.find(res->ptr_name);
+        if (arr_it != array_meta_map.end()) {
+            const auto& meta = arr_it->second;
+            auto addr_res = eval_array_lval_addr(this, ir, node, block, res, meta);
+            if (addr_res.idx_cnt < meta.dims.size()) {
+                node->has_const_value = false;
+                return addr_res.addr_reg;
+            }
+            if (res->is_const && addr_res.all_idx_const &&
+                addr_res.flat_const_idx >= 0 &&
+                addr_res.flat_const_idx < static_cast<int>(meta.const_vals.size())) {
+                node->has_const_value = true;
+                node->const_value = meta.const_vals[addr_res.flat_const_idx];
+                return std::to_string(node->const_value);
+            }
             node->has_const_value = false;
+            auto reg = ir.new_reg();
+            ir.emit(reg + " = load i32, ptr " + addr_res.addr_reg);
+            ir.emit_inst({IROp::MEM_LOAD, reg, addr_res.addr_reg, "", {}, {}});
+            return reg;
         } else {
-            node->has_const_value = true;
-            node->const_value = res->initial_value;
+            if (node->type == NodeType::LVAL && node->children.size() > 1) {
+                if (!block_error) {
+                    add_error_message(node->line, "Subscripted value is not an array.");
+                }
+            }
+            if (res->is_const) {
+                node->has_const_value = true;
+                node->const_value = res->initial_value;
+                return std::to_string(res->initial_value);
+            }
+            node->has_const_value = false;
+            auto reg = ir.new_reg();
+            ir.emit(reg + " = load i32, ptr " + res->ptr_name);
+            ir.emit_inst({IROp::LOAD, reg, res->ptr_name, "", {}, {}});
+            return reg;
         }
-        if (res->is_const) {
-            return std::to_string(res->initial_value);
-        }
-        auto reg = ir.new_reg();
-        ir.emit(reg + " = load i32, ptr " + res->ptr_name);
-        ir.emit_inst({IROp::LOAD, reg, res->ptr_name, "", {}, {}});
-        return reg;
     } else if (node->type == NodeType::SINGLE_OP) {
         auto val = dfs_op(node->children[0], block);
         if (node->children[0]->has_const_value) {
+            node->has_const_value = true;
             if (node->text == "+") node->const_value = node->children[0]->const_value;
             if (node->text == "-") node->const_value = -node->children[0]->const_value;
             if (node->text == "!") node->const_value = !node->children[0]->const_value;
@@ -489,11 +723,8 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
         }
         if (node->text == "!") {
             auto cmp = ir.new_reg();
-            // auto ext = ir.new_reg();
             ir.emit(cmp + " = icmp eq i32 " + val + ", 0");
-            // ir.emit(ext + " = zext i1 " + cmp + " to i32");
             ir.emit_inst({IROp::ICMP_EQ, cmp, val, "0", {}, {}});
-            // return ext;
             return cmp;
         }
         return val;
@@ -510,56 +741,38 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
         node->has_const_value = node->children[0]->has_const_value && node->children[1]->has_const_value;
         if (node->text == "<") {
             node->const_value = value0 < value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp slt i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_SLT, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == ">") {
             node->const_value = value0 > value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sgt i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_SGT, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == "<=") {
             node->const_value = value0 <= value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sle i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_SLE, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == ">=") {
             node->const_value = value0 >= value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp sge i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_SGE, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == "==") {
             node->const_value = value0 == value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp eq i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_EQ, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == "!=") {
             node->const_value = value0 != value1;
-            // auto ext = ir.new_reg();
             ir.emit(reg + " = icmp ne i32 " + lhs + ", " + rhs);
-            // ir.emit(ext + " = zext i1 " + reg + " to i32");
             ir.emit_inst({IROp::ICMP_NE, reg, lhs, rhs, {}, {}});
-            // return ext;
             return reg;
         }
         if (node->text == "+") {
@@ -598,7 +811,9 @@ std::string Sementiser::dfs_op(ASTNode *node, Block *block, bool block_error) {
         if (node->text == "%") {
             if (node->has_const_value) {
                 if (value1 == 0) {
-                    add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    if (!block_error) {
+                        add_error_message(node->children[1]->line, "0 is appeared as division number.");
+                    }
                     node->has_const_value = false;
                 } else {
                     node->const_value = value0 % value1;

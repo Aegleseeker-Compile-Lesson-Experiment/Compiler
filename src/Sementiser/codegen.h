@@ -11,6 +11,7 @@ private:
     std::vector<AsmInst> insts;
     std::unordered_map<std::string, int> stack_offset;
     std::unordered_map<std::string, std::string> var_reg;
+    std::unordered_set<std::string> ptr_vregs;
     std::vector<std::string> used_s_regs;
     int current_offset = -16;
     int frame_size = 0;

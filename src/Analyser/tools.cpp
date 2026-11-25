@@ -626,7 +626,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "ConstDefList") {
         if (len == 3) {
-            // ConstDefList → ConstDefList , ConstDef    
+            // ConstDefList → ConstDefList , ConstDef
             result = children[0];
             result->children.push_back(children[2]);
             delete children[1];
@@ -682,12 +682,11 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result = children[0];
         } else if (len == 2) {
             // InitVal → { }
-            result = new ASTNode(NodeType::INITVALLIST, "InitValList", children[0]->line, children[0]->column);
+            result = new ASTNode(NodeType::INITVALLIST, "EmptyInitValList", children[0]->line, children[0]->column);
             delete children[0], delete children[1];
         } else {
-            // InitVal → { InitValList }
-            result = new ASTNode(NodeType::INITVALLIST, "EmptyInitValList", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
+            // InitVal → { InitValList }（直接透传 InitValList，避免多层冗余包装）
+            result = children[1];
             delete children[0], delete children[2];
         }
     } else if (lhs == "Block") {
@@ -712,8 +711,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[0]);
         }
     } else if (lhs == "Stmt") {
-        // Stmt → MatchedStmt
-        // Stmt → OpenStmt
+        // Stmt → MatchedStmt | OpenStmt
         result = children[0];
     } else if (lhs == "MatchedStmt") {
         if (len == 7) {
@@ -747,6 +745,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         } else if (rhs[0] == "Expr") {
             // MatchedStmt → Expr ;
             result = children[0];
+            delete children[1];
         } else if (rhs[0] == "LVal") {
             // MatchedStmt → LVal = Expr ;
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
@@ -768,7 +767,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         } else if (rhs[0] == "return" && len == 2) {
             // MatchedStmt → return ;
             result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
-            delete children[1];
+            delete children[0], delete children[1];
         } else if (rhs[0] == "return" && len == 3) {
             // MatchedStmt → return Expr ;
             result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
@@ -898,21 +897,19 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1], delete children[3];
-        } else if (rhs[0] == "LVal" || rhs[0] == "NUMBER") {
-            // PrimaryExpr → LVal
-            // PrimaryExpr → NUMBER
+        } else {
+            // PrimaryExpr → LVal | NUMBER
             result = children[0];
         }
     } else if (lhs == "ForInit") {
-        if (len == 4) {
+        if (len == 2) {
             // ForInit → int VarDefList
             result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[1]);
             delete children[0];
-        } else if (len == 2) {
+        } else if (len == 3) {
             // ForInit → LVal = Expr
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1];
@@ -929,7 +926,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // ForCond → Expr
             result = children[0];
         } else {
-            // ForCond → \epsilon
+            // ForCond → ε
             result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
             delete children[0];
         }
@@ -944,7 +941,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // ForStep → Expr
             result = children[0];
         } else {
-            // ForStep → \epsilon
+            // ForStep → ε
             result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
             delete children[0];
         }
@@ -953,11 +950,11 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // FuncRParams → Expr
             result = new ASTNode(NodeType::FUNC_RPARAMS, "FuncRparams", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
-        }
-        if (len == 3) {
+        } else if (len == 3) {
             // FuncRParams → FuncRParams , Expr
             result = children[0];
             result->children.push_back(children[2]);
+            delete children[1];
         }
     } else {
         if (len == 1) {
@@ -966,10 +963,9 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[0]);
         } else {
             // LVal → LVal [ Expr ]
-            result = new ASTNode(NodeType::LVAL, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[0]);
+            result = children[0];
             result->children.push_back(children[2]);
-            delete children[1], delete children[3];            
+            delete children[1], delete children[3];
         }
     }
     sem_stack.push(result);
