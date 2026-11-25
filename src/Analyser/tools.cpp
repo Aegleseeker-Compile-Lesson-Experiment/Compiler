@@ -708,12 +708,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // RelExpr → AddExpr
             result = children[0];
         } else {
-            // RelExpr → RelExpr < AddExpr
-            // RelExpr → RelExpr > AddExpr
-            // RelExpr → RelExpr <= AddExpr
-            // RelExpr → RelExpr >= AddExpr
-            // RelExpr → RelExpr == AddExpr
-            // RelExpr → RelExpr != AddExpr
+            // RelExpr → RelExpr < AddExpr | RelExpr > AddExpr | RelExpr <= AddExpr | RelExpr >= AddExpr | RelExpr == AddExpr | RelExpr != AddExpr
             result = new ASTNode(NodeType::REL_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -724,8 +719,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // AddExpr → MulExpr
             result = children[0];
         } else {
-            // AddExpr → AddExpr + MulExpr
-            // AddExpr → AddExpr - MulExpr
+            // AddExpr → AddExpr + MulExpr | AddExpr - MulExpr
             result = new ASTNode(NodeType::ADD_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -736,9 +730,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // MulExpr → UnaryExpr
             result = children[0];
         } else {
-            // MulExpr → MulExpr * UnaryExpr
-            // MulExpr → MulExpr / UnaryExpr
-            // MulExpr → MulExpr % UnaryExpr
+            // MulExpr → MulExpr * UnaryExpr | MulExpr / UnaryExpr | MulExpr % UnaryExpr
             result = new ASTNode(NodeType::MUL_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -749,9 +741,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // UnaryExpr → PrimaryExpr
             result = children[0];
         } else {
-            // UnaryExpr → + UnaryExpr
-            // UnaryExpr → - UnaryExpr
-            // UnaryExpr → ! UnaryExpr
+            // UnaryExpr → + UnaryExpr | - UnaryExpr | ! UnaryExpr
             result = new ASTNode(NodeType::SINGLE_OP, rhs[0], children[0]->line, children[0]->column);
             result->children.push_back(children[1]);
             delete children[0];
@@ -773,8 +763,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[2]);
             delete children[1], delete children[3];
         } else if (rhs[0] == "ID" || rhs[0] == "NUMBER") {
-            // PrimaryExpr → ID
-            // PrimaryExpr → NUMBER
+            // PrimaryExpr → ID | NUMBER
             result = children[0];
         }
     } else {
@@ -787,6 +776,7 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // FuncRParams → FuncRParams , Expr
             result = children[0];
             result->children.push_back(children[2]);
+            delete children[1];
         }
     }
     sem_stack.push(result);
