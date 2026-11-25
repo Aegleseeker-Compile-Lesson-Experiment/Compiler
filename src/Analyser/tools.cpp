@@ -605,6 +605,14 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             delete children[0], delete children[1], delete children[3];
+        } else if (rhs[0] == "for") {
+            // MatchedStmt -> for ( ForInit ; ForCond ; ForStep ) MatchedStmt
+            result = new ASTNode(NodeType::FOR_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            result->children.push_back(children[6]);
+            result->children.push_back(children[8]);
+            delete children[0], delete children[1], delete children[3], delete children[5], delete children[7];
         } else if (rhs[0] == "ID") {
             // MatchedStmt -> ID = Expr ;
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
@@ -677,6 +685,14 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             delete children[0], delete children[1], delete children[3];
+        } else if (rhs[0] == "for") {
+            // OpenStmt -> for ( ForInit ; ForCond ; ForStep ) OpenStmt
+            result = new ASTNode(NodeType::FOR_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[2]);
+            result->children.push_back(children[4]);
+            result->children.push_back(children[6]);
+            result->children.push_back(children[8]);
+            delete children[0], delete children[1], delete children[3], delete children[5], delete children[7];
         }
     } else if (lhs == "Expr") {
         // Expr -> LOrExpr
@@ -776,6 +792,56 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             // PrimaryExpr -> ID
             // PrimaryExpr -> NUMBER
             result = children[0];
+        }
+    } else if (lhs == "ForInit") {
+        if (len == 4) {
+            // ForInit -> int ID = Expr
+            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[3]);
+            delete children[0], delete children[2];
+        } else if (len == 2) {
+            // ForInit -> int ID
+            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0];
+        } else if (len == 3) {
+            // ForInit -> ID = Expr
+            result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else if (rhs[0] == "Expr") {
+            // ForInit -> Expr
+            result = children[0];
+        } else {
+            // ForInit -> ε
+            result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
+            delete children[0];
+        }
+    } else if (lhs == "ForCond") {
+        if (rhs[0] == "Expr") {
+            // ForCond -> Expr
+            result = children[0];
+        } else {
+            // ForCond -> \epsilon
+            result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
+            delete children[0];
+        }
+    } else if (lhs == "ForStep") {
+        if (len == 3) {
+            // ForStep -> ID = Expr
+            result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else if (rhs[0] == "Expr") {
+            // ForStep -> Expr
+            result = children[0];
+        } else {
+            // ForStep -> \epsilon
+            result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
+            delete children[0];
         }
     } else {
         if (len == 1) {

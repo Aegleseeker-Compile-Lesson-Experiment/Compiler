@@ -219,6 +219,46 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         }
         ir.loop_stack.pop_back();
         ir.emit_label(end_label);
+    } else if (node->type == NodeType::FOR_STMT) {
+        auto _ = new Block;
+        _->fth = block;
+        _->loop_layers = block->loop_layers;
+        dfs_stmt(node->children[0], _, 0);
+        auto cond_label = ir.new_label();
+        auto body_label = ir.new_label();
+        auto step_label = ir.new_label();
+        auto end_label = ir.new_label();
+        ir.emit("br label %" + cond_label);
+        ir.emit_inst({IROp::JMP, cond_label, "", "", {}, {}});
+        ir.block_terminated = true;
+        ir.emit_label(cond_label);
+        if (node->children[1]->type == NodeType::EMPTY_STMT) {
+            ir.emit("br label %" + body_label);
+            ir.emit_inst({IROp::JMP, body_label, "", "", {}, {}});
+            ir.block_terminated = true;
+        } else {
+            auto cond_val = dfs_op(node->children[1], _);
+            auto cond_i1 = ir.new_reg();
+            ir.emit(cond_i1 + " = icmp ne i32 " + cond_val + ", 0");
+            ir.emit("br i1 " + cond_i1 + ", label %" + body_label + ", label %" + end_label);
+            ir.emit_inst({IROp::BR_COND, body_label, cond_val, end_label, {}, {}});
+            ir.block_terminated = true;
+        }
+        ir.loop_stack.push_back({step_label, end_label});
+        ir.emit_label(body_label);
+        dfs_stmt(node->children[3], _, 1);
+        if (!ir.block_terminated) {
+            ir.emit("br label %" + step_label);
+            ir.emit_inst({IROp::JMP, step_label, "", "", {}, {}});
+            ir.block_terminated = true;
+        }
+        ir.loop_stack.pop_back();
+        ir.emit_label(step_label);
+        dfs_stmt(node->children[2], _, 0);
+        ir.emit("br label %" + cond_label);
+        ir.emit_inst({IROp::JMP, cond_label, "", "", {}, {}});
+        ir.block_terminated = true;
+        ir.emit_label(end_label);
     } else if (node->type == NodeType::RETURN_STMT) {
         if (node->children.empty()) {
             if (functions.back().type != FuncType::VOID) {

@@ -6,7 +6,7 @@
 #include <queue>
 #include <set>
 
-const std::string KEYWORD[] = {"void", "return", "int", "const", "while", "if", "else", "break", "continue"};
+const std::string KEYWORD[] = {"void", "return", "int", "const", "while", "for", "if", "else", "break", "continue"};
 const std::string SYMBOL[] = {"+", "-", "*", "/", "%", "=", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "!", "(", ")", "{", "}", ";", ","};
 enum class TokenType {
     KEYWORD,

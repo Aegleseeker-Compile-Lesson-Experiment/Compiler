@@ -7,7 +7,7 @@
 
 int main(int argc, char *argv[]) {
     if (argc != 2 && argc != 3) {
-        std::printf("Usage: %s -token/-ast\n", argv[0]);
+        std::printf("Usage: %s -token/-ast/-asm/-asm -opt\n", argv[0]);
         return 1;
     }
     if (std::string(argv[1]) == "-token") {

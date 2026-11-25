@@ -2,10 +2,10 @@
 // "\epsilon" is used to describe ε.
 
 Terminal Symbol
-ID ( ) int void , { } ; = const if else while break continue return || && < > <= >= == != + - * / % ! NUMBER
+ID ( ) int void , { } ; = const if else while for break continue return || && < > <= >= == != + - * / % ! NUMBER \epsilon
 
 Non-Terminal Symbol
-CompUnit FuncDef FuncType FuncFParams Param Block StmtList Stmt MatchedStmt OpenStmt Expr LOrExpr LAndExpr RelExpr AddExpr MulExpr UnaryExpr PrimaryExpr FuncRParams
+CompUnit FuncDef FuncType FuncFParams Param Block StmtList Stmt MatchedStmt OpenStmt ForInit ForCond ForStep Expr LOrExpr LAndExpr RelExpr AddExpr MulExpr UnaryExpr PrimaryExpr FuncRParams
 
 Start Symbol
 CompUnit
@@ -28,6 +28,7 @@ Stmt → MatchedStmt
 Stmt → OpenStmt
 MatchedStmt → if ( Expr ) MatchedStmt else MatchedStmt
 MatchedStmt → while ( Expr ) MatchedStmt
+MatchedStmt → for ( ForInit ; ForCond ; ForStep ) MatchedStmt
 MatchedStmt → Block
 MatchedStmt → ;
 MatchedStmt → Expr ;
@@ -42,6 +43,17 @@ MatchedStmt → return Expr ;
 OpenStmt → if ( Expr ) Stmt
 OpenStmt → if ( Expr ) MatchedStmt else OpenStmt
 OpenStmt → while ( Expr ) OpenStmt
+OpenStmt → for ( ForInit ; ForCond ; ForStep ) OpenStmt
+ForInit → int ID = Expr
+ForInit → int ID
+ForInit → ID = Expr
+ForInit → Expr
+ForInit → \epsilon
+ForCond → Expr
+ForCond → \epsilon
+ForStep → ID = Expr
+ForStep → Expr
+ForStep → \epsilon
 Expr → LOrExpr
 LOrExpr → LAndExpr
 LOrExpr → LOrExpr || LAndExpr
