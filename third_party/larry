@@ -2,10 +2,10 @@
 // "\epsilon" is used to describe ε.
 
 Terminal Symbol
-ID ( ) int void , { } ; = const if else while for break continue return || && < > <= >= == != + - * / % ! NUMBER \epsilon
+ID ( ) int void , { } [ ] ; = const if else while for break continue return || && < > <= >= == != + - * / % ! NUMBER \epsilon
 
 Non-Terminal Symbol
-CompUnit FuncDef FuncType FuncFParams Param Block StmtList Stmt MatchedStmt OpenStmt ForInit ForCond ForStep Expr LOrExpr LAndExpr RelExpr AddExpr MulExpr UnaryExpr PrimaryExpr FuncRParams
+CompUnit FuncDef FuncType FuncFParams Param Block StmtList Stmt MatchedStmt OpenStmt ForInit ForCond ForStep Expr LOrExpr LAndExpr RelExpr AddExpr MulExpr UnaryExpr PrimaryExpr FuncRParams ArrayDims Decl VarDefList VarDef ConstDefList ConstDef InitVal InitValList LVal
 
 Start Symbol
 CompUnit
@@ -20,6 +20,27 @@ FuncType → void
 FuncFParams → FuncFParams , Param
 FuncFParams → Param
 Param → int ID
+Param → int ID [ ]
+Param → int ID [ ] ArrayDims
+Decl → int VarDefList ;
+Decl → const int ConstDefList ;
+VarDefList → VarDefList , VarDef
+VarDefList → VarDef
+VarDef → ID
+VarDef → ID = InitVal
+VarDef → ID ArrayDims
+VarDef → ID ArrayDims = InitVal
+ConstDefList → ConstDefList , ConstDef
+ConstDefList → ConstDef
+ConstDef → ID = InitVal
+ConstDef → ID ArrayDims = InitVal
+ArrayDims → [ NUMBER ]
+ArrayDims → ArrayDims [ NUMBER ]
+InitValList → InitValList , InitVal
+InitValList → InitVal
+InitVal → Expr
+InitVal → { }
+InitVal → { InitValList }
 Block → { }
 Block → { StmtList }
 StmtList → StmtList Stmt
@@ -32,10 +53,8 @@ MatchedStmt → for ( ForInit ; ForCond ; ForStep ) MatchedStmt
 MatchedStmt → Block
 MatchedStmt → ;
 MatchedStmt → Expr ;
-MatchedStmt → ID = Expr ;
-MatchedStmt → int ID ;
-MatchedStmt → int ID = Expr ;
-MatchedStmt → const int ID = Expr ;
+MatchedStmt → LVal = Expr ;
+MatchedStmt → Decl
 MatchedStmt → break ;
 MatchedStmt → continue ;
 MatchedStmt → return ;
@@ -44,14 +63,13 @@ OpenStmt → if ( Expr ) Stmt
 OpenStmt → if ( Expr ) MatchedStmt else OpenStmt
 OpenStmt → while ( Expr ) OpenStmt
 OpenStmt → for ( ForInit ; ForCond ; ForStep ) OpenStmt
-ForInit → int ID = Expr
-ForInit → int ID
-ForInit → ID = Expr
+ForInit → int VarDefList
+ForInit → LVal = Expr
 ForInit → Expr
 ForInit → \epsilon
 ForCond → Expr
 ForCond → \epsilon
-ForStep → ID = Expr
+ForStep → LVal = Expr
 ForStep → Expr
 ForStep → \epsilon
 Expr → LOrExpr
@@ -77,13 +95,15 @@ UnaryExpr → PrimaryExpr
 UnaryExpr → + UnaryExpr
 UnaryExpr → - UnaryExpr
 UnaryExpr → ! UnaryExpr
-PrimaryExpr → ID
+PrimaryExpr → LVal
 PrimaryExpr → NUMBER
 PrimaryExpr → ( Expr )
 PrimaryExpr → ID ( )
 PrimaryExpr → ID ( FuncRParams )
 FuncRParams → FuncRParams , Expr
 FuncRParams → Expr
+LVal → ID
+LVal → LVal [ Expr ]
 
 Enable Solve Left Recursion
 false

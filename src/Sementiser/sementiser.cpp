@@ -110,30 +110,37 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         dfs_block(node, _);
         delete _;
     } else if (node->type == NodeType::VARDEC_STMT) {
-        TableSymbol temp;
-        temp.name = node->children[0]->text;
-        temp.type = DataType::UNKNOWN;
-        temp.is_const = node->has_const_value;
-        temp.may_have_been_changed = false;
-        auto res = find_in_block(temp, block);
-        auto ptr = "%" + node->children[0]->text + ".addr_" + std::to_string(ir.reg_id++);
-        temp.ptr_name = ptr;
-        ir.entry_allocas << "  " << ptr << " = alloca i32\n";
-        ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
-        if (res->name != "") {
-            add_error_message(node->line, "Symbol has been used in current scope.");
-        } else {
-            delete res;
-        }
-        if (node->children.size() > 1) {
+        for (const auto& node : node->children[0]->children) {
+            TableSymbol temp;
+            temp.name = node->children[0]->text;
             temp.type = DataType::INT;
-            auto init_val = dfs_op(node->children[1], block);
-            ir.emit("store i32 " + init_val + ", ptr " + ptr);
-            ir.emit_inst({IROp::STORE, "", init_val, ptr, {}, {}});
-            temp.initial_value = node->children[1]->const_value;
-            temp.may_have_been_changed = !node->children[1]->has_const_value;
+            temp.is_const = node->has_const_value;
+            temp.may_have_been_changed = false;
+            auto res = find_in_block(temp, block);
+            auto ptr = "%" + node->children[0]->text + ".addr_" + std::to_string(ir.reg_id++);
+            temp.ptr_name = ptr;
+            ir.entry_allocas << "  " << ptr << " = alloca i32\n";
+            ir.entry_allocas_insts.push_back({IROp::ALLOCA, ptr, "", "", {}, {}});
+            if (res->name != "") {
+                add_error_message(node->line, "Symbol has been used in current scope.");
+            } else {
+                delete res;
+            }
+            if (node->type == NodeType::DECASSIGN_DEF) {
+                auto init_val = dfs_op(node->children[1], block);
+                ir.emit("store i32 " + init_val + ", ptr " + ptr);
+                ir.emit_inst({IROp::STORE, "", init_val, ptr, {}, {}});
+                temp.initial_value = node->children[1]->const_value;
+                temp.may_have_been_changed = !node->children[1]->has_const_value;
+            }
+            if (node->type == NodeType::DEC_ARRAY_DEF) {
+                // todo: 数组声明
+            }
+            if (node->type == NodeType::DECASSIGN_ARRAY_DEF) {
+                // todo: 数组声明与初始化
+            }
+            block->SymbolTable.push_back(temp);
         }
-        block->SymbolTable.push_back(temp);
     } else if (node->type == NodeType::ASSIGN_STMT) {
         TableSymbol temp;
         temp.name = node->children[0]->text;
@@ -255,6 +262,7 @@ void Sementiser::dfs_stmt(ASTNode *node, Block *block, int add_loop_layer) {
         ir.loop_stack.pop_back();
         ir.emit_label(step_label);
         dfs_stmt(node->children[2], _, 0);
+        delete _;
         ir.emit("br label %" + cond_label);
         ir.emit_inst({IROp::JMP, cond_label, "", "", {}, {}});
         ir.block_terminated = true;
@@ -354,6 +362,7 @@ std::string Sementiser::dfs_func(ASTNode *node, Block *block) {
     } else {
         bool first_p = true;
         for (const auto &parameter : node->children[2]->children) {
+            // todo: 增加函数参数
             auto p_name = parameter->children[0]->text;
             auto param_reg = "%" + p_name;
             ir_fn.params.push_back(param_reg);

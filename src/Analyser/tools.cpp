@@ -518,24 +518,24 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
     ASTNode* result = nullptr;
     if (lhs == "CompUnit") {
         if (len == 2) {
-            // CompUnit -> CompUnit FuncDef
+            // CompUnit → CompUnit FuncDef
             result = children[0];
             result->children.push_back(children[1]);
         } else {
-            // CompUnit -> FuncDef
+            // CompUnit → FuncDef
             result = new ASTNode(NodeType::COMP_UNIT, "CompUnit", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
         }
     } else if (lhs == "FuncDef") {
         if (len == 5) {
-            // FuncDef -> FuncType ID ( ) Block
+            // FuncDef → FuncType ID ( ) Block
             result = new ASTNode(NodeType::FUNC_DEF, "FuncDef", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[1]);
             result->children.push_back(children[4]);
             delete children[2], delete children[3];
         } else {
-            // FuncDef -> FuncType ID ( FuncFParams ) Block
+            // FuncDef → FuncType ID ( FuncFParams ) Block
             result = new ASTNode(NodeType::FUNC_DEF, "FuncDef", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[1]);
@@ -545,148 +545,258 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "FuncType") {
         if (rhs[0] == "int" || rhs[0] == "void") {
-            // FuncType -> int | void
+            // FuncType → int | void
             result = new ASTNode(NodeType::FUNC_TYPE, rhs[0], children[0]->line, children[0]->column);
             result->data_type = rhs[0] == "int" ? DataType::INT : DataType::VOID;
             delete children[0];
         }
     } else if (lhs == "FuncFParams") {
         if (len == 3) {
-            // FuncFParams -> FuncFParams , Param
+            // FuncFParams → FuncFParams , Param
             result = children[0];
             result->children.push_back(children[2]);
             delete children[1];
         } else {
-            // FuncFParams -> Param
+            // FuncFParams → Param
             result = new ASTNode(NodeType::FUNC_FPARAMS, "FuncFParams", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
         }
     } else if (lhs == "Param") {
-        // Param -> int ID
-        result = new ASTNode(NodeType::PARAM, "Param", children[0]->line, children[0]->column);
-        result->children.push_back(children[1]);
-        delete children[0];
+        if (len == 2) {
+            // Param → int ID
+            result = new ASTNode(NodeType::PARAM, "Param", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0];
+        } else if (len == 4) {
+            // Param → int ID [ ]
+            result = new ASTNode(NodeType::ARRAYPARAM, "ArrayParam", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2], delete children[3];
+        } else {
+            // Param → int ID [ ] ArrayDims
+            result = new ASTNode(NodeType::ARRAYPARAM, "ArrayParam", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[4]);
+            delete children[0], delete children[2], delete children[3];
+        }
+    } else if (lhs == "Decl") {
+        if (len == 3) {
+            // Decl → int VarDefList ;
+            result = children[1];
+            delete children[0], delete children[2];
+        } else {
+            // Decl → const int ConstDefList ;
+            result = children[2];
+            delete children[0], delete children[1], delete children[3];
+        }
+    } else if (lhs == "VarDefList") {
+        if (len == 3) {
+            // VarDefList → VarDefList , VarDef
+            result = children[0];
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else {
+            // VarDefList → VarDef
+            result = new ASTNode(NodeType::DEFLIST, "VarDefList", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "VarDef") {
+        if (len == 1) {
+            // VarDef → ID
+            result = new ASTNode(NodeType::DEC_DEF, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        } else if (len == 3) {
+            // VarDef → ID = InitVal
+            result = new ASTNode(NodeType::DECASSIGN_DEF, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else if (len == 2) {
+            // VarDef → ID ArrayDims
+            result = new ASTNode(NodeType::DEC_ARRAY_DEF, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[1]);
+        } else if (len == 4) {
+            // VarDef → ID ArrayDims = InitVal
+            result = new ASTNode(NodeType::DECASSIGN_ARRAY_DEF, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[3]);
+            delete children[2];
+        }
+    } else if (lhs == "ConstDefList") {
+        if (len == 3) {
+            // ConstDefList → ConstDefList , ConstDef    
+            result = children[0];
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else {
+            // ConstDefList → ConstDef
+            result = new ASTNode(NodeType::DEFLIST, "ConstDefList", children[0]->line, children[0]->column);
+            result->has_const_value = true;
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "ConstDef") {
+        if (len == 3) {
+            // ConstDef → ID = InitVal
+            result = new ASTNode(NodeType::DECASSIGN_DEF, "", children[0]->line, children[0]->column);
+            result->has_const_value = true;
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else {
+            // ConstDef → ID ArrayDims = InitVal
+            result = new ASTNode(NodeType::DECASSIGN_ARRAY_DEF, "", children[0]->line, children[0]->column);
+            result->has_const_value = true;
+            result->children.push_back(children[0]);
+            result->children.push_back(children[1]);
+            result->children.push_back(children[3]);
+            delete children[2];
+        }
+    } else if (lhs == "ArrayDims") {
+        if (len == 3) {
+            // ArrayDims → [ NUMBER ]
+            result = new ASTNode(NodeType::ARRAYDIMS, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
+        } else {
+            // ArrayDims → ArrayDims [ NUMBER ]
+            result = children[0];
+            result->children.push_back(children[2]);
+            delete children[1], delete children[3];
+        }
+    } else if (lhs == "InitValList") {
+        if (len == 3) {
+            // InitValList → InitValList , InitVal
+            result = children[0];
+            result->children.push_back(children[2]);
+            delete children[1];
+        } else {
+            // InitValList → InitVal
+            result = new ASTNode(NodeType::INITVALLIST, "InitValList", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        }
+    } else if (lhs == "InitVal") {
+        if (len == 1) {
+            // InitVal → Expr
+            result = children[0];
+        } else if (len == 2) {
+            // InitVal → { }
+            result = new ASTNode(NodeType::INITVALLIST, "InitValList", children[0]->line, children[0]->column);
+            delete children[0], delete children[1];
+        } else {
+            // InitVal → { InitValList }
+            result = new ASTNode(NodeType::INITVALLIST, "EmptyInitValList", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
+        }
     } else if (lhs == "Block") {
         if (len == 2) {
-            // Block -> { }
+            // Block → { }
             result = new ASTNode(NodeType::BLOCK, "EmptyBlock", children[0]->line, children[0]->column);
             delete children[0], delete children[1];
         } else {
-            // Block -> { StmtList }
+            // Block → { StmtList }
             result = new ASTNode(NodeType::BLOCK, "Block", children[0]->line, children[0]->column);
             result->children.push_back(children[1]);
             delete children[0], delete children[2];
         }
     } else if (lhs == "StmtList") {
         if (len == 2) {
-            // StmtList -> StmtList Stmt
+            // StmtList → StmtList Stmt
             result = children[0];
             result->children.push_back(children[1]);
         } else {
-            // StmtList -> Stmt
+            // StmtList → Stmt
             result = new ASTNode(NodeType::STMT_LIST, "StmtList", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
         }
     } else if (lhs == "Stmt") {
-        // Stmt -> MatchedStmt
-        // Stmt -> OpenStmt
+        // Stmt → MatchedStmt
+        // Stmt → OpenStmt
         result = children[0];
     } else if (lhs == "MatchedStmt") {
         if (len == 7) {
-            // MatchedStmt -> if ( Expr ) MatchedStmt else MatchedStmt
+            // MatchedStmt → if ( Expr ) MatchedStmt else MatchedStmt
             result = new ASTNode(NodeType::IFELSE_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             result->children.push_back(children[6]);
             delete children[0], delete children[1], delete children[3], delete children[5];
         } else if (rhs[0] == "while") {
-            // MatchedStmt -> while ( Expr ) MatchedStmt
+            // MatchedStmt → while ( Expr ) MatchedStmt
             result = new ASTNode(NodeType::WHILE_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             delete children[0], delete children[1], delete children[3];
         } else if (rhs[0] == "for") {
-            // MatchedStmt -> for ( ForInit ; ForCond ; ForStep ) MatchedStmt
+            // MatchedStmt → for ( ForInit ; ForCond ; ForStep ) MatchedStmt
             result = new ASTNode(NodeType::FOR_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             result->children.push_back(children[6]);
             result->children.push_back(children[8]);
             delete children[0], delete children[1], delete children[3], delete children[5], delete children[7];
-        } else if (rhs[0] == "ID") {
-            // MatchedStmt -> ID = Expr ;
+        } else if (rhs[0] == "Block") {
+            // MatchedStmt → Block
+            result = children[0];
+        } else if (rhs[0] == ";") {
+            // MatchedStmt → ;
+            result = new ASTNode(NodeType::EMPTY_STMT, ";", children[0]->line, children[0]->column);
+            delete children[0];
+        } else if (rhs[0] == "Expr") {
+            // MatchedStmt → Expr ;
+            result = children[0];
+        } else if (rhs[0] == "LVal") {
+            // MatchedStmt → LVal = Expr ;
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1], delete children[3];
-        } else if (len == 5) {
-            // MatchedStmt -> int ID = Expr ;
+        } else if (rhs[0] == "Decl") {
+            // MatchedStmt → Decl
             result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
-            result->children.push_back(children[3]);
-            delete children[0], delete children[2], delete children[4];
-        } else if (rhs[0] == "const") {
-            // MatchedStmt -> const int ID = Expr ;
-            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[2]);
-            result->children.push_back(children[4]);
-            result->has_const_value = true;
-            delete children[0], delete children[1], delete children[3], delete children[5];
-        } else if (rhs[0] == "int") {
-            // MatchedStmt -> int ID ;
-            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
-            delete children[0], delete children[2];
-        } else if (rhs[0] == "return" && len == 2) {
-            // MatchedStmt -> return ;
-            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
-            delete children[1];
-        } else if (rhs[0] == "return" && len == 3) {
-            // MatchedStmt -> return Expr ;
-            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
-            delete children[0], delete children[2];
+            result->children.push_back(children[0]);
         } else if (rhs[0] == "break") {
-            // MatchedStmt -> break ;
+            // MatchedStmt → break ;
             result = new ASTNode(NodeType::BREAK_STMT, "", children[0]->line, children[0]->column);
             delete children[0], delete children[1];
         } else if (rhs[0] == "continue") {
-            // MatchedStmt -> continue ;
+            // MatchedStmt → continue ;
             result = new ASTNode(NodeType::CONTINUE_STMT, "", children[0]->line, children[0]->column);
             delete children[0], delete children[1];
-        } else if (rhs[0] == "Block") {
-            // MatchedStmt -> Block
-            result = children[0];
-        } else if (rhs[0] == ";") {
-            // MatchedStmt -> ;
-            result = new ASTNode(NodeType::EMPTY_STMT, ";", children[0]->line, children[0]->column);
-            delete children[0];
-        } else {
-            // MatchedStmt -> Expr ;
-            result = children[0];
+        } else if (rhs[0] == "return" && len == 2) {
+            // MatchedStmt → return ;
+            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
+            delete children[1];
+        } else if (rhs[0] == "return" && len == 3) {
+            // MatchedStmt → return Expr ;
+            result = new ASTNode(NodeType::RETURN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
+            delete children[0], delete children[2];
         }
     } else if (lhs == "OpenStmt") {
         if (len == 7) {
-            // OpenStmt -> if ( Expr ) MatchedStmt else OpenStmt
+            // OpenStmt → if ( Expr ) MatchedStmt else OpenStmt
             result = new ASTNode(NodeType::IFELSE_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             result->children.push_back(children[6]);
             delete children[0], delete children[1], delete children[3], delete children[5];
         } else if (rhs[0] == "while") {
-            // OpenStmt -> while ( Expr ) OpenStmt
+            // OpenStmt → while ( Expr ) OpenStmt
             result = new ASTNode(NodeType::WHILE_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             delete children[0], delete children[1], delete children[3];
         } else if (rhs[0] == "if") {
-            // OpenStmt -> if ( Expr ) Stmt
+            // OpenStmt → if ( Expr ) Stmt
             result = new ASTNode(NodeType::IF_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
             delete children[0], delete children[1], delete children[3];
         } else if (rhs[0] == "for") {
-            // OpenStmt -> for ( ForInit ; ForCond ; ForStep ) OpenStmt
+            // OpenStmt → for ( ForInit ; ForCond ; ForStep ) OpenStmt
             result = new ASTNode(NodeType::FOR_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[2]);
             result->children.push_back(children[4]);
@@ -695,14 +805,14 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
             delete children[0], delete children[1], delete children[3], delete children[5], delete children[7];
         }
     } else if (lhs == "Expr") {
-        // Expr -> LOrExpr
+        // Expr → LOrExpr
         result = children[0];
     } else if (lhs == "LOrExpr") {
         if (len == 1) {
-            // LOrExpr -> LAndExpr
+            // LOrExpr → LAndExpr
             result = children[0];
         } else {
-            // LOrExpr -> LOrExpr || LAndExpr
+            // LOrExpr → LOrExpr || LAndExpr
             result = new ASTNode(NodeType::LOGIC_OP, "||", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -710,10 +820,10 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "LAndExpr") {
         if (len == 1) {
-            // LAndExpr -> RelExpr
+            // LAndExpr → RelExpr
             result = children[0];
         } else {
-            // LAndExpr -> LAndExpr && RelExpr
+            // LAndExpr → LAndExpr && RelExpr
             result = new ASTNode(NodeType::LOGIC_OP, "&&", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -721,15 +831,15 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "RelExpr") {
         if (len == 1) {
-            // RelExpr -> AddExpr
+            // RelExpr → AddExpr
             result = children[0];
         } else {
-            // RelExpr -> RelExpr < AddExpr
-            // RelExpr -> RelExpr > AddExpr
-            // RelExpr -> RelExpr <= AddExpr
-            // RelExpr -> RelExpr >= AddExpr
-            // RelExpr -> RelExpr == AddExpr
-            // RelExpr -> RelExpr != AddExpr
+            // RelExpr → RelExpr < AddExpr
+            // RelExpr → RelExpr > AddExpr
+            // RelExpr → RelExpr <= AddExpr
+            // RelExpr → RelExpr >= AddExpr
+            // RelExpr → RelExpr == AddExpr
+            // RelExpr → RelExpr != AddExpr
             result = new ASTNode(NodeType::REL_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -737,11 +847,11 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "AddExpr") {
         if (len == 1) {
-            // AddExpr -> MulExpr
+            // AddExpr → MulExpr
             result = children[0];
         } else {
-            // AddExpr -> AddExpr + MulExpr
-            // AddExpr -> AddExpr - MulExpr
+            // AddExpr → AddExpr + MulExpr
+            // AddExpr → AddExpr - MulExpr
             result = new ASTNode(NodeType::ADD_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -749,12 +859,12 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "MulExpr") {
         if (len == 1) {
-            // MulExpr -> UnaryExpr
+            // MulExpr → UnaryExpr
             result = children[0];
         } else {
-            // MulExpr -> MulExpr * UnaryExpr
-            // MulExpr -> MulExpr / UnaryExpr
-            // MulExpr -> MulExpr % UnaryExpr
+            // MulExpr → MulExpr * UnaryExpr
+            // MulExpr → MulExpr / UnaryExpr
+            // MulExpr → MulExpr % UnaryExpr
             result = new ASTNode(NodeType::MUL_OP, rhs[1], children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
@@ -762,97 +872,104 @@ void reduce_to_astnode(std::stack<ASTNode*> &sem_stack, std::string lhs, Product
         }
     } else if (lhs == "UnaryExpr") {
         if (len == 1) {
-            // UnaryExpr -> PrimaryExpr
+            // UnaryExpr → PrimaryExpr
             result = children[0];
         } else {
-            // UnaryExpr -> + UnaryExpr
-            // UnaryExpr -> - UnaryExpr
-            // UnaryExpr -> ! UnaryExpr
+            // UnaryExpr → + UnaryExpr
+            // UnaryExpr → - UnaryExpr
+            // UnaryExpr → ! UnaryExpr
             result = new ASTNode(NodeType::SINGLE_OP, rhs[0], children[0]->line, children[0]->column);
             result->children.push_back(children[1]);
             delete children[0];
         }
     } else if (lhs == "PrimaryExpr") {
         if (len == 3 && rhs[1] == "Expr") {
-            // PrimaryExpr -> ( Expr )
+            // PrimaryExpr → ( Expr )
             result = children[1];
             delete children[0], delete children[2];
         } else if (len == 3) {
-            // PrimaryExpr -> ID ( )
+            // PrimaryExpr → ID ( )
             result = new ASTNode(NodeType::FUNC_CALL, "FuncCall", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             delete children[1], delete children[2];
         } else if (len == 4) {
-            // PrimaryExpr -> ID ( FuncRParams )
+            // PrimaryExpr → ID ( FuncRParams )
             result = new ASTNode(NodeType::FUNC_CALL, "FuncCall", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1], delete children[3];
-        } else if (rhs[0] == "ID" || rhs[0] == "NUMBER") {
-            // PrimaryExpr -> ID
-            // PrimaryExpr -> NUMBER
+        } else if (rhs[0] == "LVal" || rhs[0] == "NUMBER") {
+            // PrimaryExpr → LVal
+            // PrimaryExpr → NUMBER
             result = children[0];
         }
     } else if (lhs == "ForInit") {
         if (len == 4) {
-            // ForInit -> int ID = Expr
-            result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
-            result->children.push_back(children[1]);
-            result->children.push_back(children[3]);
-            delete children[0], delete children[2];
-        } else if (len == 2) {
-            // ForInit -> int ID
+            // ForInit → int VarDefList
             result = new ASTNode(NodeType::VARDEC_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[1]);
             delete children[0];
-        } else if (len == 3) {
-            // ForInit -> ID = Expr
+        } else if (len == 2) {
+            // ForInit → LVal = Expr
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[1]);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1];
         } else if (rhs[0] == "Expr") {
-            // ForInit -> Expr
+            // ForInit → Expr
             result = children[0];
         } else {
-            // ForInit -> ε
+            // ForInit → ε
             result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
             delete children[0];
         }
     } else if (lhs == "ForCond") {
         if (rhs[0] == "Expr") {
-            // ForCond -> Expr
+            // ForCond → Expr
             result = children[0];
         } else {
-            // ForCond -> \epsilon
+            // ForCond → \epsilon
             result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
             delete children[0];
         }
     } else if (lhs == "ForStep") {
         if (len == 3) {
-            // ForStep -> ID = Expr
+            // ForStep → LVal = Expr
             result = new ASTNode(NodeType::ASSIGN_STMT, "", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
             result->children.push_back(children[2]);
             delete children[1];
         } else if (rhs[0] == "Expr") {
-            // ForStep -> Expr
+            // ForStep → Expr
             result = children[0];
         } else {
-            // ForStep -> \epsilon
+            // ForStep → \epsilon
             result = new ASTNode(NodeType::EMPTY_STMT, "", children[0]->line, children[0]->column);
             delete children[0];
         }
-    } else {
+    } else if (lhs == "FuncRParams") {
         if (len == 1) {
-            // FuncRParams -> Expr
+            // FuncRParams → Expr
             result = new ASTNode(NodeType::FUNC_RPARAMS, "FuncRparams", children[0]->line, children[0]->column);
             result->children.push_back(children[0]);
         }
         if (len == 3) {
-            // FuncRParams -> FuncRParams , Expr
+            // FuncRParams → FuncRParams , Expr
             result = children[0];
             result->children.push_back(children[2]);
+        }
+    } else {
+        if (len == 1) {
+            // LVal → ID
+            result = new ASTNode(NodeType::LVAL, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+        } else {
+            // LVal → LVal [ Expr ]
+            result = new ASTNode(NodeType::LVAL, "", children[0]->line, children[0]->column);
+            result->children.push_back(children[0]);
+            result->children.push_back(children[2]);
+            delete children[1], delete children[3];            
         }
     }
     sem_stack.push(result);

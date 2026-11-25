@@ -7,7 +7,7 @@
 #include <set>
 
 const std::string KEYWORD[] = {"void", "return", "int", "const", "while", "for", "if", "else", "break", "continue"};
-const std::string SYMBOL[] = {"+", "-", "*", "/", "%", "=", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "!", "(", ")", "{", "}", ";", ","};
+const std::string SYMBOL[] = {"+", "-", "*", "/", "%", "=", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "!", "(", ")", "{", "}", ";", ",", "[", "]"};
 enum class TokenType {
     KEYWORD,
     SYMBOL,
