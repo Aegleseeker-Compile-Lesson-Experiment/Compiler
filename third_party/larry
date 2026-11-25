@@ -11,67 +11,67 @@ Start Symbol
 CompUnit
 
 Productions
-CompUnit \to CompUnit FuncDef
-CompUnit \to FuncDef
-FuncDef \to FuncType ID ( ) Block
-FuncDef \to FuncType ID ( FuncFParams ) Block
-FuncType \to int
-FuncType \to void
-FuncFParams \to FuncFParams , Param
-FuncFParams \to Param
-Param \to int ID
-Block \to { }
-Block \to { StmtList }
-StmtList \to StmtList Stmt
-StmtList \to Stmt
-Stmt \to MatchedStmt
-Stmt \to OpenStmt
-MatchedStmt \to if ( Expr ) MatchedStmt else MatchedStmt
-MatchedStmt \to while ( Expr ) MatchedStmt
-MatchedStmt \to Block
-MatchedStmt \to ;
-MatchedStmt \to Expr ;
-MatchedStmt \to ID = Expr ;
-MatchedStmt \to int ID ;
-MatchedStmt \to int ID = Expr ;
-MatchedStmt \to const int ID = Expr ;
-MatchedStmt \to break ;
-MatchedStmt \to continue ;
-MatchedStmt \to return ;
-MatchedStmt \to return Expr ;
-OpenStmt \to if ( Expr ) Stmt
-OpenStmt \to if ( Expr ) MatchedStmt else OpenStmt
-OpenStmt \to while ( Expr ) OpenStmt
-Expr \to LOrExpr
-LOrExpr \to LAndExpr
-LOrExpr \to LOrExpr || LAndExpr
-LAndExpr \to RelExpr
-LAndExpr \to LAndExpr && RelExpr
-RelExpr \to AddExpr
-RelExpr \to RelExpr < AddExpr
-RelExpr \to RelExpr > AddExpr
-RelExpr \to RelExpr <= AddExpr
-RelExpr \to RelExpr >= AddExpr
-RelExpr \to RelExpr == AddExpr
-RelExpr \to RelExpr != AddExpr
-AddExpr \to MulExpr
-AddExpr \to AddExpr + MulExpr
-AddExpr \to AddExpr - MulExpr
-MulExpr \to UnaryExpr
-MulExpr \to MulExpr * UnaryExpr
-MulExpr \to MulExpr / UnaryExpr
-MulExpr \to MulExpr % UnaryExpr
-UnaryExpr \to PrimaryExpr
-UnaryExpr \to + UnaryExpr
-UnaryExpr \to - UnaryExpr
-UnaryExpr \to ! UnaryExpr
-PrimaryExpr \to ID
-PrimaryExpr \to NUMBER
-PrimaryExpr \to ( Expr )
-PrimaryExpr \to ID ( )
-PrimaryExpr \to ID ( FuncRParams )
-FuncRParams \to FuncRParams , Expr
-FuncRParams \to Expr
+CompUnit → CompUnit FuncDef
+CompUnit → FuncDef
+FuncDef → FuncType ID ( ) Block
+FuncDef → FuncType ID ( FuncFParams ) Block
+FuncType → int
+FuncType → void
+FuncFParams → FuncFParams , Param
+FuncFParams → Param
+Param → int ID
+Block → { }
+Block → { StmtList }
+StmtList → StmtList Stmt
+StmtList → Stmt
+Stmt → MatchedStmt
+Stmt → OpenStmt
+MatchedStmt → if ( Expr ) MatchedStmt else MatchedStmt
+MatchedStmt → while ( Expr ) MatchedStmt
+MatchedStmt → Block
+MatchedStmt → ;
+MatchedStmt → Expr ;
+MatchedStmt → ID = Expr ;
+MatchedStmt → int ID ;
+MatchedStmt → int ID = Expr ;
+MatchedStmt → const int ID = Expr ;
+MatchedStmt → break ;
+MatchedStmt → continue ;
+MatchedStmt → return ;
+MatchedStmt → return Expr ;
+OpenStmt → if ( Expr ) Stmt
+OpenStmt → if ( Expr ) MatchedStmt else OpenStmt
+OpenStmt → while ( Expr ) OpenStmt
+Expr → LOrExpr
+LOrExpr → LAndExpr
+LOrExpr → LOrExpr || LAndExpr
+LAndExpr → RelExpr
+LAndExpr → LAndExpr && RelExpr
+RelExpr → AddExpr
+RelExpr → RelExpr < AddExpr
+RelExpr → RelExpr > AddExpr
+RelExpr → RelExpr <= AddExpr
+RelExpr → RelExpr >= AddExpr
+RelExpr → RelExpr == AddExpr
+RelExpr → RelExpr != AddExpr
+AddExpr → MulExpr
+AddExpr → AddExpr + MulExpr
+AddExpr → AddExpr - MulExpr
+MulExpr → UnaryExpr
+MulExpr → MulExpr * UnaryExpr
+MulExpr → MulExpr / UnaryExpr
+MulExpr → MulExpr % UnaryExpr
+UnaryExpr → PrimaryExpr
+UnaryExpr → + UnaryExpr
+UnaryExpr → - UnaryExpr
+UnaryExpr → ! UnaryExpr
+PrimaryExpr → ID
+PrimaryExpr → NUMBER
+PrimaryExpr → ( Expr )
+PrimaryExpr → ID ( )
+PrimaryExpr → ID ( FuncRParams )
+FuncRParams → FuncRParams , Expr
+FuncRParams → Expr
 
 Enable Solve Left Recursion
 false

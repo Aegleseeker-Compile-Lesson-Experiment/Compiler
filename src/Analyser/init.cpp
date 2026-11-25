@@ -98,7 +98,7 @@ bool parse_productions(const std::string &s) {
                     now = temp;
                 } else {
                     if (state == production::Arrow) {
-                        if (temp != "\\to") {
+                        if (temp != "→") {
                             return false;
                         }
                         state = production::Right;
